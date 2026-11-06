@@ -2,6 +2,7 @@ import http from "node:http";
 import { loadConfig } from "./config.js";
 import { LamixClient, AuthError, sleep } from "./lamix.js";
 import { MatrixClient } from "./matrix.js";
+import { SignalPulseClient } from "./signal.js";
 import { State } from "./state.js";
 import { CliStore } from "./clis.js";
 import { escapeHtml, sendTelegram, splitMessage, discoverChatId, verifyBot } from "./telegram.js";
@@ -24,6 +25,9 @@ const health = {
   cliOffset: 0,
   lamixRestarts: 0,
   matrixRestarts: 0,
+  signalRestarts: 0,
+  lastSignalRefreshAt: null,
+  signalError: null,
   telegramErrors: 0,
 };
 let chatIds = config.telegram.chatIds?.length ? [...config.telegram.chatIds] : config.telegram.chatId ? [config.telegram.chatId] : [];
@@ -45,21 +49,37 @@ function formatAge(ageMs) {
   return `${m}m ${String(r).padStart(2, "0")}s ago`;
 }
 function formatUtc(ms, { withDate = false } = {}) {
-  const iso = new Date(ms).toISOString();
-  return withDate ? `${iso.replace("T", " ").slice(0, 19)} UTC` : `${iso.slice(11, 19)} UTC`;
+  // User time = IST (Asia/Kolkata, UTC+5:30) — premium timeline, user local
+  const ist = new Date(ms + 5.5 * 60 * 60 * 1000);
+  const iso = ist.toISOString();
+  const body = withDate ? `${iso.replace("T", " ").slice(0, 19)} IST` : `${iso.slice(11, 19)} IST`;
+  return withDate ? `${body} · ${formatUtc(ist.getTime()).slice(0, 8)} UTC` : body;
+}
+function formatIstDate(ms, { withDate = true } = {}) {
+  const istMs = ms + 5.5 * 60 * 60 * 1000;
+  const d = new Date(istMs);
+  const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()];
+  const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getUTCMonth()];
+  const time = d.toISOString().slice(11, 19);
+  const date = d.toISOString().slice(0, 10);
+  return `${time} IST · ${day} ${date} (${mon})`;
 }
 function buildMessage(cycles, total) {
   const nowMs = Math.max(...cycles.map((c) => c.serverNowMs));
+  const clisTracked = cliStore.clis.length;
+  const lines = [
+    `━━━━━━━ <b>LAMIX CLI LIVE</b> ━━━━━━━`,
+    `🚨 <b>${total} FRESH HIT${total === 1 ? "" : "S"}</b> · last ${config.windowMinutes} min`,
+    `🕒 ${formatIstDate(nowMs)}`,
+    `📌 <b>${cycles.length} CLIs</b> checked · <b>${clisTracked} total</b> tracked`,
+  ];
+  // Sort: priority CLIs first, then by alert count desc
   const prioritySet = new Set((config.priorityClis ?? []).map((c) => String(c).toLowerCase()));
   const hasPriorityHit = cycles.some(
     (c) => c.alerts.length > 0 && prioritySet.has(String(c.cli).toLowerCase()),
   );
   const header = hasPriorityHit ? "🔥" : "🚨";
-  const lines = [
-    `${header} <b>${hasPriorityHit ? "PRIORITY CLI alert" : "CLI alert"}</b> — ${total} range${total === 1 ? "" : "s"} hit in the last ${config.windowMinutes} min`,
-    `🕒 ${formatUtc(nowMs, { withDate: true })}`,
-  ];
-  // Sort: priority CLIs first so the hottest sender is at the top
+  lines[1] = `${header} <b>${hasPriorityHit ? "PRIORITY HIT" : "FRESH HIT"}</b> — ${total} range${total === 1 ? "" : "s"} in last ${config.windowMinutes} min`;
   const sortedCycles = [...cycles].sort((a, b) => {
     const aP = prioritySet.has(String(a.cli).toLowerCase()) ? 0 : 1;
     const bP = prioritySet.has(String(b.cli).toLowerCase()) ? 0 : 1;
@@ -72,14 +92,34 @@ function buildMessage(cycles, total) {
     const emoji = isPriority ? "🔥" : "•";
     lines.push(
       "",
-      `${emoji} <b>${escapeHtml(cycle.cli)}</b>${isPriority ? " ⭐ PRIORITY" : ""} — ${cycle.alerts.length} hit${cycle.alerts.length === 1 ? "" : "s"}`,
+      `━━━━━━━ ${emoji} <b>${escapeHtml(cycle.cli)}</b>${isPriority ? " ⭐ PRIORITY" : ""} ━━━━━━━`,
     );
     for (const a of cycle.alerts) {
-      lines.push(`  • <b>${escapeHtml(a.range)}</b>`, `     ${formatAge(a.ageMs)} · last seen ${formatUtc(a.lastSeenMs)}`);
+      lines.push(`  📍 <b>${escapeHtml(a.range)}</b>`, `     ⏱ ${formatAge(a.ageMs)} · last seen ${formatIstDate(a.lastSeenMs)}`);
     }
   }
-  lines.push("", `<i>Source: lamix panel CLI Search · last ${config.windowMinutes} min · ${cliStore.clis.length} CLIs tracked</i>`);
+  lines.push("", `━━━━━━━ <i>Source: lamix panel CLI Search · last ${config.windowMinutes} min</i> ━━━━━━━`);
   return lines.join("\n");
+}
+
+async function refreshSignalIfNeeded(signal, force = false) {
+  const nowMs = Date.now();
+  const last = health.lastSignalRefreshAt ? new Date(health.lastSignalRefreshAt).getTime() : 0;
+  if (!force && nowMs - last < config.signal.refreshMinutes * 60 * 1000) return;
+  if (!config.signal.enabled) return;
+  log(`[signal] refreshing CLI list (every ${config.signal.refreshMinutes} min)`);
+  try {
+    const result = await signal.harvest();
+    const { added, total } = cliStore.merge([result.all]);
+    cliStore.setMeta({ ...cliStore.meta, signal: result.meta, lastSignalAdded: added, lastSignalTotal: total });
+    health.lastSignalRefreshAt = new Date().toISOString();
+    health.signalError = null;
+    log(`[signal] harvest done — ${total} unique CLIs (added ${added})`);
+  } catch (err) {
+    health.signalError = err.message;
+    warn(`[signal] refresh failed: ${err.message}`);
+    health.lastSignalRefreshAt = new Date().toISOString();
+  }
 }
 
 async function refreshMatrixIfNeeded(matrix, force = false) {
@@ -339,6 +379,13 @@ async function main() {
   const server = startHealthServer();
   startSelfPing();
 
+  // SignalPulse client (fast HTTP, no browser) — never blocks on Matrix
+  let signal = null;
+  if (config.signal.enabled) {
+    signal = new SignalPulseClient({ baseUrl: config.signal.baseUrl, logger });
+    await refreshSignalIfNeeded(signal, true);
+  }
+
   const lamix = new LamixClient({
     baseUrl: config.lamix.baseUrl,
     username: config.lamix.username,
@@ -393,6 +440,7 @@ async function main() {
   // Initial Matrix harvest (unless --scan-once requires it explicitly)
   if (matrix) await refreshMatrixIfNeeded(matrix, true);
   else cliStore.merge([config.manualClis]);
+  if (signal) await refreshSignalIfNeeded(signal, true);
 
   if (config.scanOnce) {
     log(`[scan-once] CLIs saved: ${cliStore.clis.length} -> ${config.cliFile}`);
@@ -414,6 +462,7 @@ async function main() {
         restartRequested = false;
       }
       if (matrix) await refreshMatrixIfNeeded(matrix, false);
+      if (signal) await refreshSignalIfNeeded(signal, false);
       await runCycle(lamix);
       health.lastSuccessAt = new Date().toISOString();
       health.lastError = null;

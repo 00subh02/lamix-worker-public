@@ -130,11 +130,11 @@ export class LamixClient {
     await input.fill(cli);
 
     let lastError = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= 2; attempt++) {
       const responsePromise = page.waitForResponse(
         (response) =>
           response.url().includes("/api/cli-search") && response.request().method() === "GET",
-        { timeout: 45000 },
+        { timeout: 20000 },
       );
 
       const searchButton = page

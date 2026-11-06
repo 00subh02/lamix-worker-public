@@ -29,6 +29,12 @@ services:
         sync: false
       - key: MATRIX_REFRESH_MINUTES
         value: "60"
+      - key: SIGNAL_ENABLED
+        value: "true"
+      - key: SIGNAL_BASE_URL
+        value: http://201.18.218.200:8080
+      - key: SIGNAL_REFRESH_MINUTES
+        value: "5"
       - key: CLI_FILE
         value: ./data/clis.json
       - key: TELEGRAM_BOT_TOKEN
@@ -36,7 +42,7 @@ services:
       - key: TELEGRAM_CHAT_ID
         sync: false
       - key: POLL_SECONDS
-        value: "20"
+        value: "10"
       - key: WINDOW_MINUTES
         value: "2"
       - key: RANGE_COOLDOWN_MINUTES
@@ -50,6 +56,6 @@ services:
       - key: SELF_PING_URL
         value: https://lamix-cli-bot.onrender.com/healthz
       - key: SELF_PING_MINUTES
-        value: "10"
+        value: "2"
       - key: TZ
         value: UTC

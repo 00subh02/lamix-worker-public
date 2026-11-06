@@ -55,6 +55,11 @@ export function loadConfig() {
   const priorityClis = parseClis(process.env.PRIORITY_CLIS || "Lark");
   const searchWindowHours = int("SEARCH_WINDOW_HOURS", 24, { min: 1, max: 168 });
 
+  // SignalPulse source (fast, no browser) — refreshed independently if enabled
+  const signalEnabled = bool("SIGNAL_ENABLED", true);
+  const signalUrl = optional("SIGNAL_BASE_URL", "http://201.18.218.200:8080").replace(/\/+$/, "");
+  const signalRefreshMinutes = int("SIGNAL_REFRESH_MINUTES", 5, { min: 1, max: 1440 });
+
   const selfPingUrl = optional("SELF_PING_URL", "");
   // Allow multiple URLs (comma-separated) for unlimited keep-alive redundancy
   const selfPingUrls = selfPingUrl ? selfPingUrl.split(",").map((s) => s.trim()).filter(Boolean) : [];
@@ -71,6 +76,11 @@ export function loadConfig() {
       username: matrixUsername,
       password: matrixPassword,
       refreshMinutes: matrixRefreshMinutes,
+    },
+    signal: {
+      enabled: signalEnabled,
+      baseUrl: signalUrl,
+      refreshMinutes: signalRefreshMinutes,
     },
     telegram: { token: telegramToken, chatId: telegramChatId, chatIds: allChatIds },
     manualClis,
