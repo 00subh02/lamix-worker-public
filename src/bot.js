@@ -167,67 +167,98 @@ async function runCycle(client) {
   // Apply MAX_CLIS cap if set
   if (config.maxClis > 0 && batch.length > config.maxClis) batch = batch.slice(0, config.maxClis);
 
-  const cycles = [];
-  for (const cli of batch) {
-    try {
-      const result = await client.searchCli(cli);
-      const { rows, serverNowMs } = result;
-      const alerts = [];
-      const cooldownMs = config.rangeCooldownMinutes * 60 * 1000;
-      for (const row of rows) {
-        const range = String(row.range ?? "").trim();
-        const lastSeenMs = parseServerTime(row.lastSeen);
-        if (!range || lastSeenMs === null) continue;
-        const ageMs = serverNowMs - lastSeenMs;
-        if (ageMs > config.windowMinutes * 60 * 1000) continue;
-        if (ageMs < -config.futureSkewSeconds * 1000) continue;
-        const exactKey = `${cli}|${range}|${row.lastSeen}`;
-        if (state.wasAlerted(exactKey)) continue;
-        const rangeKey = `${cli}|${range}`;
-        if (state.rangeCooldownActive(rangeKey, serverNowMs, cooldownMs)) continue;
-        alerts.push({ range, lastSeenMs, ageMs, exactKey, rangeKey });
+  // Fast-path: check priority CLIs first and alert immediately, so Lark is
+  // effectively checked every cycle at the earliest possible moment (user wants
+  // "every second" — Lamix page load is ~4s so ~10s is the physical floor).
+  async function checkCli(cli) {
+    const result = await client.searchCli(cli);
+    const { rows, serverNowMs } = result;
+    const alerts = [];
+    const cooldownMs = config.rangeCooldownMinutes * 60 * 1000;
+    for (const row of rows) {
+      const range = String(row.range ?? "").trim();
+      const lastSeenMs = parseServerTime(row.lastSeen);
+      if (!range || lastSeenMs === null) continue;
+      const ageMs = serverNowMs - lastSeenMs;
+      if (ageMs > config.windowMinutes * 60 * 1000) continue;
+      if (ageMs < -config.futureSkewSeconds * 1000) continue;
+      const exactKey = `${cli}|${range}|${row.lastSeen}`;
+      if (state.wasAlerted(exactKey)) continue;
+      const rangeKey = `${cli}|${range}`;
+      if (state.rangeCooldownActive(rangeKey, serverNowMs, cooldownMs)) continue;
+      alerts.push({ range, lastSeenMs, ageMs, exactKey, rangeKey });
+    }
+    alerts.sort((a, b) => b.lastSeenMs - a.lastSeenMs);
+    log(`checked "${cli}": ${rows.length} row(s), ${alerts.length} new hit(s)` + (result.capped ? " (capped)" : ""));
+    return { cli, alerts, serverNowMs };
+  }
+
+  async function sendAlerts(cyclesToSend) {
+    const totalToSend = cyclesToSend.reduce((s, c) => s + c.alerts.length, 0);
+    if (totalToSend === 0) return 0;
+    if (!chatIds.length && !config.dryRun) {
+      const discovered = await discoverChatId({ token: config.telegram.token, logger });
+      if (discovered) chatIds = [discovered];
+    }
+    if (!chatIds.length && !config.dryRun) {
+      warn("[telegram] no chat id — add the bot to your group and send any message, then set TELEGRAM_CHAT_ID");
+      return 0;
+    }
+    const message = buildMessage(cyclesToSend, totalToSend);
+    const parts = splitMessage(message);
+    for (const part of parts) {
+      for (const cid of chatIds) {
+        try {
+          await sendTelegram({ token: config.telegram.token, chatId: cid, text: part, dryRun: config.dryRun, logger });
+        } catch (err) {
+          health.telegramErrors += 1;
+          warn(`[telegram] send to ${cid} failed: ${err.message}`);
+        }
+        if (!config.dryRun) await sleep(600);
       }
-      alerts.sort((a, b) => b.lastSeenMs - a.lastSeenMs);
-      cycles.push({ cli, alerts, serverNowMs });
-      log(`checked "${cli}": ${rows.length} row(s), ${alerts.length} new hit(s)` + (result.capped ? " (capped)" : ""));
+    }
+    const sentAt = Math.max(...cyclesToSend.map((c) => c.serverNowMs));
+    for (const c of cyclesToSend) for (const a of c.alerts) state.markAlerted(a.exactKey, a.rangeKey, sentAt);
+    state.save();
+    health.alertsSent += totalToSend;
+    log(`${config.dryRun ? "prepared dry-run" : "sent Telegram"} alert for ${totalToSend} range(s)`);
+    return totalToSend;
+  }
+
+  const priorityBatch = batch.filter((c) => prioritySet.has(String(c).toLowerCase()));
+  const restBatch = batch.filter((c) => !prioritySet.has(String(c).toLowerCase()));
+
+  // 1) Priority fast-path (Lark every cycle)
+  const priorityCycles = [];
+  for (const cli of priorityBatch) {
+    try {
+      const cycle = await checkCli(cli);
+      priorityCycles.push(cycle);
+    } catch (err) {
+      if (err instanceof AuthError) throw err;
+      warn(`CLI "${cli}" failed: ${err.message}`);
+    }
+  }
+  await sendAlerts(priorityCycles);
+
+  // 2) Rotate the rest
+  const cycles = [...priorityCycles];
+  for (const cli of restBatch) {
+    try {
+      const cycle = await checkCli(cli);
+      cycles.push(cycle);
     } catch (err) {
       if (err instanceof AuthError) throw err;
       warn(`CLI "${cli}" failed: ${err.message}`);
     }
   }
 
-  const total = cycles.reduce((s, c) => s + c.alerts.length, 0);
-  if (total === 0) return { sent: 0, cycles };
+  // Send the rest (priority already sent above, so only send non-priority hits now)
+  const restCycles = cycles.filter((c) => !prioritySet.has(String(c.cli).toLowerCase()));
+  await sendAlerts(restCycles);
 
-  if (!chatIds.length && !config.dryRun) {
-    const discovered = await discoverChatId({ token: config.telegram.token, logger });
-    if (discovered) chatIds = [discovered];
-  }
-  if (!chatIds.length && !config.dryRun) {
-    warn("[telegram] no chat id — add the bot to your group and send any message, then set TELEGRAM_CHAT_ID");
-    return { sent: 0, cycles };
-  }
-
-  const message = buildMessage(cycles, total);
-  const parts = splitMessage(message);
-  // Broadcast to every group (user locks bot to 2 GCs)
-  for (const part of parts) {
-    for (const cid of chatIds) {
-      try {
-        await sendTelegram({ token: config.telegram.token, chatId: cid, text: part, dryRun: config.dryRun, logger });
-      } catch (err) {
-        health.telegramErrors += 1;
-        warn(`[telegram] send to ${cid} failed: ${err.message}`);
-      }
-      if (!config.dryRun) await sleep(600);
-    }
-  }
-  const sentAt = Math.max(...cycles.map((c) => c.serverNowMs));
-  for (const c of cycles) for (const a of c.alerts) state.markAlerted(a.exactKey, a.rangeKey, sentAt);
-  state.save();
-  health.alertsSent += total;
-  log(`${config.dryRun ? "prepared dry-run" : "sent Telegram"} alert for ${total} range(s)`);
-  return { sent: total, cycles };
+  const totalSent = priorityCycles.reduce((s, c) => s + c.alerts.length, 0) + restCycles.reduce((s, c) => s + c.alerts.length, 0);
+  return { sent: totalSent, cycles };
 }
 
 function startHealthServer() {
