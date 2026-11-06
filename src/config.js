@@ -56,8 +56,10 @@ export function loadConfig() {
   const searchWindowHours = int("SEARCH_WINDOW_HOURS", 24, { min: 1, max: 168 });
 
   const selfPingUrl = optional("SELF_PING_URL", "");
-  const selfPingMinutes = int("SELF_PING_MINUTES", 10, { min: 1, max: 60 });
-  const selfPingEnabled = bool("SELF_PING_ENABLED", true) && Boolean(selfPingUrl);
+  // Allow multiple URLs (comma-separated) for unlimited keep-alive redundancy
+  const selfPingUrls = selfPingUrl ? selfPingUrl.split(",").map((s) => s.trim()).filter(Boolean) : [];
+  const selfPingMinutes = int("SELF_PING_MINUTES", 2, { min: 1, max: 60 });
+  const selfPingEnabled = bool("SELF_PING_ENABLED", true) && selfPingUrls.length > 0;
 
   const port = process.env.PORT ? Number.parseInt(process.env.PORT, 10) : null;
 
@@ -86,7 +88,7 @@ export function loadConfig() {
     once: process.argv.includes("--once"),
     scanOnce: process.argv.includes("--scan-once"),
     port,
-    selfPing: { url: selfPingUrl || null, minutes: selfPingMinutes, enabled: selfPingEnabled },
+    selfPing: { url: selfPingUrls[0] || null, urls: selfPingUrls, minutes: selfPingMinutes, enabled: selfPingEnabled },
     searchWindowHours,
   };
 }

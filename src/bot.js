@@ -290,24 +290,29 @@ function startHealthServer() {
 }
 
 function startSelfPing() {
-  const { url, minutes, enabled } = config.selfPing;
-  if (!enabled || !url) {
+  const { url, minutes, enabled, urls } = config.selfPing;
+  const targets = urls?.length ? urls : url ? [url] : [];
+  if (!enabled || targets.length === 0) {
     log("[self-ping] disabled (set SELF_PING_URL=https://<your-app>.onrender.com/healthz)");
     return null;
   }
   const intervalMs = minutes * 60 * 1000;
   const ping = async () => {
-    try {
-      const res = await fetch(url, { method: "GET" });
-      log(`[self-ping] GET ${url} -> ${res.status}`);
-    } catch (err) {
-      warn(`[self-ping] failed: ${err.message}`);
+    for (const u of targets) {
+      try {
+        // Cache-bust so Render/Cloudflare never serve a cached /healthz (must hit origin)
+        const bust = `${u}${u.includes("?") ? "&" : "?"}t=${Date.now()}`;
+        const res = await fetch(bust, { method: "GET", redirect: "follow" });
+        log(`[self-ping] GET ${u} -> ${res.status} (keep-alive)`);
+      } catch (err) {
+        warn(`[self-ping] ${u} failed: ${err.message}`);
+      }
     }
   };
   ping();
   const timer = setInterval(ping, intervalMs);
   timer.unref?.();
-  log(`[self-ping] every ${minutes} min -> ${url}`);
+  log(`[self-ping] unlimited keep-alive every ${minutes} min -> ${targets.join(", ")}`);
   return timer;
 }
 
