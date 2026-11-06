@@ -47,6 +47,7 @@ export function loadConfig() {
   const maxClis = int("MAX_CLIS", 0, { min: 0 }); // 0 = unlimited
   const clisPerCycle = int("CLIS_PER_CYCLE", 30, { min: 0 }); // 0 = all each cycle
   const matrixRefreshMinutes = int("MATRIX_REFRESH_MINUTES", 60, { min: 1, max: 1440 });
+  const priorityClis = parseClis(process.env.PRIORITY_CLIS || "Lark");
   const searchWindowHours = int("SEARCH_WINDOW_HOURS", 24, { min: 1, max: 168 });
 
   const selfPingUrl = optional("SELF_PING_URL", "");
@@ -66,6 +67,7 @@ export function loadConfig() {
     },
     telegram: { token: telegramToken, chatId: telegramChatId || null },
     manualClis,
+    priorityClis,
     cliFile,
     maxClis,
     clisPerCycle,

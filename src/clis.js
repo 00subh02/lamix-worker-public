@@ -21,6 +21,10 @@ export function cleanCliList(list, { minLen = 2, maxLen = 30 } = {}) {
     // never match Lamix CLI search and waste the 429 budget.
     if (/^[0-9]{2,7}$/.test(cli)) continue;
     if (/^[0-9\-]{2,7}$/.test(cli)) continue;
+    // Drop long numeric phone-like senders with leading 0/00 — almost always noise
+    // from failed-messages rows[].from (e.g. 0123456789, 00...). Keep +49-style real senders
+    // only if they look like a full E.164 number.
+    if (/^0[0-9]{6,}$/.test(cli)) continue;
     const key = cli.toLowerCase();
     if (!seen.has(key)) seen.set(key, cli);
   }

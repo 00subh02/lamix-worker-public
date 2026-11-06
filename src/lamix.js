@@ -168,7 +168,7 @@ export class LamixClient {
       const serverNowMs = Number.isFinite(headerNow) && headerNow > 0 ? headerNow : Number.isFinite(dateNow) ? dateNow : Date.now();
 
       // Gentle pacing to stay under Lamix rate-limit (429 every ~5 fast hits)
-      await sleep(1500);
+      await sleep(2500);
 
       return {
         cli,

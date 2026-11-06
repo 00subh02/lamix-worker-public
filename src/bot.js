@@ -45,18 +45,35 @@ function formatUtc(ms, { withDate = false } = {}) {
 }
 function buildMessage(cycles, total) {
   const nowMs = Math.max(...cycles.map((c) => c.serverNowMs));
+  const prioritySet = new Set((config.priorityClis ?? []).map((c) => String(c).toLowerCase()));
+  const hasPriorityHit = cycles.some(
+    (c) => c.alerts.length > 0 && prioritySet.has(String(c.cli).toLowerCase()),
+  );
+  const header = hasPriorityHit ? "🔥" : "🚨";
   const lines = [
-    `🚨 <b>CLI alert</b> — ${total} range${total === 1 ? "" : "s"} hit in the last ${config.windowMinutes} min`,
+    `${header} <b>${hasPriorityHit ? "PRIORITY CLI alert" : "CLI alert"}</b> — ${total} range${total === 1 ? "" : "s"} hit in the last ${config.windowMinutes} min`,
     `🕒 ${formatUtc(nowMs, { withDate: true })}`,
   ];
-  for (const cycle of cycles) {
+  // Sort: priority CLIs first so the hottest sender is at the top
+  const sortedCycles = [...cycles].sort((a, b) => {
+    const aP = prioritySet.has(String(a.cli).toLowerCase()) ? 0 : 1;
+    const bP = prioritySet.has(String(b.cli).toLowerCase()) ? 0 : 1;
+    if (aP !== bP) return aP - bP;
+    return (b.alerts.length || 0) - (a.alerts.length || 0);
+  });
+  for (const cycle of sortedCycles) {
     if (!cycle.alerts.length) continue;
-    lines.push("", `<b>${escapeHtml(cycle.cli)}</b> — ${cycle.alerts.length} hit${cycle.alerts.length === 1 ? "" : "s"}`);
+    const isPriority = prioritySet.has(String(cycle.cli).toLowerCase());
+    const emoji = isPriority ? "🔥" : "•";
+    lines.push(
+      "",
+      `${emoji} <b>${escapeHtml(cycle.cli)}</b>${isPriority ? " ⭐ PRIORITY" : ""} — ${cycle.alerts.length} hit${cycle.alerts.length === 1 ? "" : "s"}`,
+    );
     for (const a of cycle.alerts) {
-      lines.push(`• <b>${escapeHtml(a.range)}</b>`, `   ${formatAge(a.ageMs)} · last seen ${formatUtc(a.lastSeenMs)}`);
+      lines.push(`  • <b>${escapeHtml(a.range)}</b>`, `     ${formatAge(a.ageMs)} · last seen ${formatUtc(a.lastSeenMs)}`);
     }
   }
-  lines.push("", `<i>Source: panel.lamix.org CLI Search · last ${config.windowMinutes} min · ${cliStore.clis.length} CLIs tracked</i>`);
+  lines.push("", `<i>Source: lamix panel CLI Search · last ${config.windowMinutes} min · ${cliStore.clis.length} CLIs tracked</i>`);
   return lines.join("\n");
 }
 
@@ -108,17 +125,38 @@ async function runCycle(client) {
     return { sent: 0, cycles: [] };
   }
 
-  // Shard rotation for large pools — prioritize high-signal CLIs first.
-  // Matrix order is already by activity (live_feed counts), so rotating shards
-  // still covers the hottest CLIs every cycle.
+  // Shard rotation for large pools — priority CLIs are always checked first,
+  // every cycle, so hot senders (e.g. Lark) get 0-2 min coverage even with 250+ CLIs.
   let batch = allClis;
+  const priorityClis = config.priorityClis ?? [];
+  const prioritySet = new Set(priorityClis.map((c) => String(c).toLowerCase()));
+
+  // Build ordered list: priority CLIs first, then the rest alphabetically
+  const orderedAll = [...allClis];
+  // Ensure priority CLIs are in the store even if Matrix never returned them
+  for (const pc of priorityClis) {
+    if (!cliStore.clis.some((c) => String(c).toLowerCase() === String(pc).toLowerCase())) {
+      cliStore.merge([[pc]]);
+    }
+  }
+  const allFresh = [...cliStore.snapshot()].sort((a, b) => {
+    const aP = prioritySet.has(String(a).toLowerCase()) ? 0 : 1;
+    const bP = prioritySet.has(String(b).toLowerCase()) ? 0 : 1;
+    if (aP !== bP) return aP - bP;
+    return String(a).toLowerCase().localeCompare(String(b).toLowerCase());
+  });
+
   if (config.clisPerCycle > 0) {
-    const total = allClis.length;
-    const start = health.cliOffset % total;
-    batch = [];
-    for (let i = 0; i < Math.min(config.clisPerCycle, total); i++) batch.push(allClis[(start + i) % total]);
-    health.cliOffset = (start + config.clisPerCycle) % total;
-    log(`[batch] searching ${batch.length}/${total} CLIs (offset ${start} next=${health.cliOffset})`);
+    const total = allFresh.length;
+    const priorityInList = allFresh.filter((c) => prioritySet.has(String(c).toLowerCase()));
+    const rest = allFresh.filter((c) => !prioritySet.has(String(c).toLowerCase()));
+    const restPerCycle = Math.max(0, config.clisPerCycle - priorityInList.length);
+    const start = rest.length > 0 ? health.cliOffset % rest.length : 0;
+    const restBatch = [];
+    for (let i = 0; i < Math.min(restPerCycle, rest.length); i++) restBatch.push(rest[(start + i) % rest.length]);
+    health.cliOffset = rest.length > 0 ? (start + restPerCycle) % rest.length : 0;
+    batch = [...priorityInList, ...restBatch];
+    log(`[batch] searching ${batch.length}/${total} CLIs (priority ${priorityInList.join(",") || "none"} + ${restBatch.length} rotate, offset ${start} next=${health.cliOffset})`);
   }
 
   // Apply MAX_CLIS cap if set
