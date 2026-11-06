@@ -41,7 +41,12 @@ export function loadConfig() {
   if (!lamixUsername || !lamixPassword) throw new Error("Missing LAMIX_USERNAME / LAMIX_PASSWORD");
 
   const telegramToken = required("TELEGRAM_BOT_TOKEN");
-  const telegramChatId = optional("TELEGRAM_CHAT_ID", ""); // may be auto-discovered
+  // Supports comma-separated chat ids for multi-group broadcast (e.g. "-100aaa,-100bbb")
+  const telegramChatIds = parseClis(process.env.TELEGRAM_CHAT_ID || "");
+  // Backward compat: also accept TELEGRAM_CHAT_IDS plural
+  const telegramChatIdsPlural = parseClis(process.env.TELEGRAM_CHAT_IDS || "");
+  const allChatIds = [...new Set([...telegramChatIds, ...telegramChatIdsPlural])];
+  const telegramChatId = allChatIds[0] || null;
 
   const cliFile = optional("CLI_FILE", "./data/clis.json");
   const maxClis = int("MAX_CLIS", 0, { min: 0 }); // 0 = unlimited
@@ -65,7 +70,7 @@ export function loadConfig() {
       password: matrixPassword,
       refreshMinutes: matrixRefreshMinutes,
     },
-    telegram: { token: telegramToken, chatId: telegramChatId || null },
+    telegram: { token: telegramToken, chatId: telegramChatId, chatIds: allChatIds },
     manualClis,
     priorityClis,
     cliFile,

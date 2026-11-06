@@ -107,13 +107,13 @@ export class LamixClient {
     const page = this.page;
     if (page.url().includes("/cli-search") && !this.isOnLoginPage()) return;
 
-    await page.goto(`${this.baseUrl}/cli-search`, { waitUntil: "domcontentloaded" });
+    await page.goto(`${this.baseUrl}/cli-search`, { waitUntil: "commit", timeout: 30000 });
     if (this.isOnLoginPage()) {
       throw new AuthError("Session expired while opening CLI Search (redirected to login).");
     }
     await page
       .locator('input[placeholder*="full sender" i]')
-      .waitFor({ state: "visible", timeout: 30000 });
+      .waitFor({ state: "visible", timeout: 20000 });
   }
 
   /**
@@ -168,7 +168,7 @@ export class LamixClient {
       const serverNowMs = Number.isFinite(headerNow) && headerNow > 0 ? headerNow : Number.isFinite(dateNow) ? dateNow : Date.now();
 
       // Gentle pacing to stay under Lamix rate-limit (429 every ~5 fast hits)
-      await sleep(2500);
+      await sleep(2000);
 
       return {
         cli,

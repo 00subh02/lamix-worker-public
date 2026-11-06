@@ -16,12 +16,17 @@ const health = {
   lastError: null,
   alertsSent: 0,
   cycle: 0,
+  consecutiveFailures: 0,
+  lastCycleMs: null,
   lastMatrixRefreshAt: null,
   matrixError: null,
   cliCount: 0,
   cliOffset: 0,
+  lamixRestarts: 0,
+  matrixRestarts: 0,
+  telegramErrors: 0,
 };
-let chatId = config.telegram.chatId;
+let chatIds = config.telegram.chatIds?.length ? [...config.telegram.chatIds] : config.telegram.chatId ? [config.telegram.chatId] : [];
 function log(m) { console.log(`[${new Date().toISOString()}] ${m}`); }
 function warn(m) { console.warn(`[${new Date().toISOString()}] ${m}`); }
 const logger = { info: log, warn, error: warn };
@@ -194,18 +199,28 @@ async function runCycle(client) {
   const total = cycles.reduce((s, c) => s + c.alerts.length, 0);
   if (total === 0) return { sent: 0, cycles };
 
-  if (!chatId && !config.dryRun) {
-    chatId = await discoverChatId({ token: config.telegram.token, logger }) || chatId;
+  if (!chatIds.length && !config.dryRun) {
+    const discovered = await discoverChatId({ token: config.telegram.token, logger });
+    if (discovered) chatIds = [discovered];
   }
-  if (!chatId && !config.dryRun) {
+  if (!chatIds.length && !config.dryRun) {
     warn("[telegram] no chat id — add the bot to your group and send any message, then set TELEGRAM_CHAT_ID");
     return { sent: 0, cycles };
   }
 
   const message = buildMessage(cycles, total);
-  for (const part of splitMessage(message)) {
-    await sendTelegram({ token: config.telegram.token, chatId: chatId ?? "dry-run", text: part, dryRun: config.dryRun, logger });
-    if (!config.dryRun) await sleep(1100);
+  const parts = splitMessage(message);
+  // Broadcast to every group (user locks bot to 2 GCs)
+  for (const part of parts) {
+    for (const cid of chatIds) {
+      try {
+        await sendTelegram({ token: config.telegram.token, chatId: cid, text: part, dryRun: config.dryRun, logger });
+      } catch (err) {
+        health.telegramErrors += 1;
+        warn(`[telegram] send to ${cid} failed: ${err.message}`);
+      }
+      if (!config.dryRun) await sleep(600);
+    }
   }
   const sentAt = Math.max(...cycles.map((c) => c.serverNowMs));
   for (const c of cycles) for (const a of c.alerts) state.markAlerted(a.exactKey, a.rangeKey, sentAt);
@@ -220,13 +235,19 @@ function startHealthServer() {
   const server = http.createServer((req, res) => {
     if (req.url === "/healthz" || req.url === "/health") {
       res.writeHead(200, { "content-type": "application/json" });
+      const uptimeSeconds = Math.round((Date.now() - new Date(health.startedAt).getTime()) / 1000);
+      const healthy = !health.lastError && (!health.lastSuccessAt || Date.now() - new Date(health.lastSuccessAt).getTime() < 10 * 60 * 1000);
       res.end(JSON.stringify({
-        ok: !health.lastError,
-        uptimeSeconds: Math.round((Date.now() - new Date(health.startedAt).getTime()) / 1000),
+        ok: healthy,
+        uptimeSeconds,
+        uptimeHuman: `${Math.floor(uptimeSeconds / 3600)}h ${Math.floor((uptimeSeconds % 3600) / 60)}m ${uptimeSeconds % 60}s`,
         ...health,
         clisTracked: cliStore.clis.length,
         windowMinutes: config.windowMinutes,
         pollSeconds: config.pollSeconds,
+        priorityClis: config.priorityClis,
+        telegramChatIds: chatIds,
+        memory: process.memoryUsage(),
       }));
       return;
     }
@@ -265,17 +286,18 @@ async function main() {
   log(`CLI file: ${config.cliFile} · State file: ${config.stateFile}${config.dryRun ? " · DRY RUN" : ""}`);
 
   if (!config.dryRun) await verifyBot({ token: config.telegram.token, logger });
-  if (!chatId && !config.dryRun) {
-    chatId = await discoverChatId({ token: config.telegram.token, logger });
-    if (chatId) {
-      process.env.TELEGRAM_CHAT_ID = chatId;
-      log(`[telegram] using auto-discovered chat id: ${chatId}`);
-      log(`[telegram] TIP: also set TELEGRAM_CHAT_ID=${chatId} in env for Render`);
+  if (!chatIds.length && !config.dryRun) {
+    const discovered = await discoverChatId({ token: config.telegram.token, logger });
+    if (discovered) {
+      chatIds = [discovered];
+      process.env.TELEGRAM_CHAT_ID = discovered;
+      log(`[telegram] using auto-discovered chat id: ${discovered}`);
+      log(`[telegram] TIP: also set TELEGRAM_CHAT_ID=${discovered} in env for Render`);
     } else {
       warn("[telegram] TELEGRAM_CHAT_ID not set and no auto-discovered chat. Add bot to group, send a message, then restart.");
     }
-  } else if (chatId) {
-    log(`[telegram] chat id: ${chatId}`);
+  } else if (chatIds.length) {
+    log(`[telegram] chat ids: ${chatIds.join(", ")}`);
   }
 
   const server = startHealthServer();
@@ -305,8 +327,10 @@ async function main() {
 
   try { await lamix.start(); } catch (err) { console.error(`[fatal] Lamix start failed: ${err.message}`); process.exit(1); }
 
+  // Watchdog + auto-recovery: never stay dead.
   let running = true;
   let restartRequested = false;
+  let fatalStreak = 0;
   const shutdown = async (signal) => {
     if (!running) return;
     running = false;
@@ -318,6 +342,17 @@ async function main() {
   };
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
+
+  // Uncaught error hooks: log and let the watchdog restart, never silently die
+  process.on("uncaughtException", (err) => {
+    console.error(`[uncaught] ${err.stack || err.message}`);
+    health.lastError = err.message;
+    health.consecutiveFailures += 1;
+  });
+  process.on("unhandledRejection", (err) => {
+    console.error(`[unhandled] ${err?.stack || err}`);
+    health.lastError = err?.message || String(err);
+  });
 
   // Initial Matrix harvest (unless --scan-once requires it explicitly)
   if (matrix) await refreshMatrixIfNeeded(matrix, true);
@@ -337,20 +372,42 @@ async function main() {
     health.cycle += 1;
     health.lastCycleAt = new Date().toISOString();
     try {
-      if (restartRequested) { await lamix.restart(); restartRequested = false; }
+      if (restartRequested) {
+        await lamix.restart();
+        health.lamixRestarts += 1;
+        restartRequested = false;
+      }
       if (matrix) await refreshMatrixIfNeeded(matrix, false);
       await runCycle(lamix);
       health.lastSuccessAt = new Date().toISOString();
       health.lastError = null;
+      health.consecutiveFailures = 0;
+      fatalStreak = 0;
+      health.lastCycleMs = Date.now() - startedAt;
     } catch (err) {
       health.lastError = err.message;
-      warn(`cycle failed: ${err.message}`);
-      if (err instanceof AuthError || /crash|closed|Target page/i.test(err.message)) restartRequested = true;
+      health.consecutiveFailures += 1;
+      fatalStreak += 1;
+      health.lastCycleMs = Date.now() - startedAt;
+      warn(`cycle failed (${fatalStreak} in a row): ${err.message}`);
+      // Auto-restart browser on auth/crash, backoff harder after repeated failures
+      if (err instanceof AuthError || /crash|closed|Target page/i.test(err.message)) {
+        restartRequested = true;
+      }
+      if (fatalStreak >= 3) {
+        warn(`[watchdog] ${fatalStreak} consecutive failures — full restart in 10s`);
+        await sleep(10000);
+        await lamix.restart().catch((e) => warn(`lamix restart failed: ${e.message}`));
+        health.lamixRestarts += 1;
+        restartRequested = false;
+      }
     }
     if (state.prune(Date.now()) > 0) state.save();
     if (config.once) break;
     const elapsed = Date.now() - startedAt;
-    await sleep(Math.max(1000, config.pollSeconds * 1000 - elapsed));
+    // Smooth pacing: keep at least 5s gap between cycles to avoid 429 storms
+    const waitMs = Math.max(5000, config.pollSeconds * 1000 - elapsed);
+    await sleep(waitMs);
   }
   await lamix.stop().catch(() => {});
   await matrix?.stop().catch(() => {});

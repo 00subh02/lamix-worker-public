@@ -17,6 +17,8 @@ services:
         sync: false
       - key: LAMIX_CLIS
         value: Lark
+      - key: PRIORITY_CLIS
+        value: Lark
       - key: MATRIX_BASE_URL
         value: https://matrixpanel.io
       - key: MATRIX_ENABLED
