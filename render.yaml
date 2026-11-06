@@ -1,0 +1,53 @@
+services:
+  - type: web
+    name: lamix-cli-bot
+    runtime: docker
+    plan: free
+    region: frankfurt
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    autoDeploy: true
+    healthCheckPath: /healthz
+    envVars:
+      - key: LAMIX_BASE_URL
+        value: https://panel.lamix.org
+      - key: LAMIX_USERNAME
+        sync: false
+      - key: LAMIX_PASSWORD
+        sync: false
+      - key: LAMIX_CLIS
+        value: Lark
+      - key: MATRIX_BASE_URL
+        value: https://matrixpanel.io
+      - key: MATRIX_ENABLED
+        value: "true"
+      - key: MATRIX_USERNAME
+        sync: false
+      - key: MATRIX_PASSWORD
+        sync: false
+      - key: MATRIX_REFRESH_MINUTES
+        value: "60"
+      - key: CLI_FILE
+        value: ./data/clis.json
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: POLL_SECONDS
+        value: "30"
+      - key: WINDOW_MINUTES
+        value: "2"
+      - key: RANGE_COOLDOWN_MINUTES
+        value: "10"
+      - key: CLIS_PER_CYCLE
+        value: "0"
+      - key: STATE_FILE
+        value: ./data/state.json
+      - key: SELF_PING_ENABLED
+        value: "true"
+      - key: SELF_PING_URL
+        value: ""
+      - key: SELF_PING_MINUTES
+        value: "10"
+      - key: TZ
+        value: UTC
