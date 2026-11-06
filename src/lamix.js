@@ -130,7 +130,7 @@ export class LamixClient {
     await input.fill(cli);
 
     let lastError = null;
-    for (let attempt = 1; attempt <= 4; attempt++) {
+    for (let attempt = 1; attempt <= 3; attempt++) {
       const responsePromise = page.waitForResponse(
         (response) =>
           response.url().includes("/api/cli-search") && response.request().method() === "GET",
@@ -147,8 +147,8 @@ export class LamixClient {
       const status = response.status();
       if (status === 429) {
         const retryAfter = Number(response.headers()["retry-after"] || 30);
-        const waitMs = Math.min(90000, (Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 15) * 1000 * attempt);
-        this.logger.warn(`[lamix] rate-limited (429) on CLI "${cli}", attempt ${attempt}/4 — waiting ${Math.round(waitMs / 1000)}s`);
+        const waitMs = Math.min(60000, (Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 15) * 1000 * attempt);
+        this.logger.warn(`[lamix] rate-limited (429) on CLI "${cli}", attempt ${attempt}/3 — waiting ${Math.round(waitMs / 1000)}s`);
         await sleep(waitMs);
         lastError = new Error("CLI search rate-limited (429)");
         try { await response.text().catch(() => {}); } catch {}
@@ -167,8 +167,8 @@ export class LamixClient {
       const dateNow = Date.parse(response.headers()["date"] || "");
       const serverNowMs = Number.isFinite(headerNow) && headerNow > 0 ? headerNow : Number.isFinite(dateNow) ? dateNow : Date.now();
 
-      // Gentle pacing to stay under rate-limit
-      await sleep(800);
+      // Gentle pacing to stay under Lamix rate-limit (429 every ~5 fast hits)
+      await sleep(1500);
 
       return {
         cli,

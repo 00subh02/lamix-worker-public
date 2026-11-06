@@ -108,14 +108,17 @@ async function runCycle(client) {
     return { sent: 0, cycles: [] };
   }
 
-  // Shard rotation for large pools
+  // Shard rotation for large pools — prioritize high-signal CLIs first.
+  // Matrix order is already by activity (live_feed counts), so rotating shards
+  // still covers the hottest CLIs every cycle.
   let batch = allClis;
-  if (config.clisPerCycle > 0 && allClis.length > config.clisPerCycle) {
-    const start = health.cliOffset % allClis.length;
+  if (config.clisPerCycle > 0) {
+    const total = allClis.length;
+    const start = health.cliOffset % total;
     batch = [];
-    for (let i = 0; i < config.clisPerCycle; i++) batch.push(allClis[(start + i) % allClis.length]);
-    health.cliOffset = (start + config.clisPerCycle) % allClis.length;
-    log(`[batch] searching ${batch.length}/${allClis.length} CLIs (offset ${start})`);
+    for (let i = 0; i < Math.min(config.clisPerCycle, total); i++) batch.push(allClis[(start + i) % total]);
+    health.cliOffset = (start + config.clisPerCycle) % total;
+    log(`[batch] searching ${batch.length}/${total} CLIs (offset ${start} next=${health.cliOffset})`);
   }
 
   // Apply MAX_CLIS cap if set

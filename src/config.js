@@ -45,7 +45,7 @@ export function loadConfig() {
 
   const cliFile = optional("CLI_FILE", "./data/clis.json");
   const maxClis = int("MAX_CLIS", 0, { min: 0 }); // 0 = unlimited
-  const clisPerCycle = int("CLIS_PER_CYCLE", 0, { min: 0 }); // 0 = all remaining each cycle
+  const clisPerCycle = int("CLIS_PER_CYCLE", 30, { min: 0 }); // 0 = all each cycle
   const matrixRefreshMinutes = int("MATRIX_REFRESH_MINUTES", 60, { min: 1, max: 1440 });
   const searchWindowHours = int("SEARCH_WINDOW_HOURS", 24, { min: 1, max: 168 });
 
@@ -69,7 +69,7 @@ export function loadConfig() {
     cliFile,
     maxClis,
     clisPerCycle,
-    pollSeconds: int("POLL_SECONDS", 30, { min: 10 }),
+    pollSeconds: int("POLL_SECONDS", 20, { min: 10 }),
     windowMinutes: int("WINDOW_MINUTES", 2, { min: 1, max: 1440 }),
     rangeCooldownMinutes: int("RANGE_COOLDOWN_MINUTES", 10, { min: 0, max: 1440 }),
     futureSkewSeconds: int("FUTURE_SKEW_SECONDS", 30, { min: 0 }),

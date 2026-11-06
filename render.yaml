@@ -34,19 +34,19 @@ services:
       - key: TELEGRAM_CHAT_ID
         sync: false
       - key: POLL_SECONDS
-        value: "30"
+        value: "20"
       - key: WINDOW_MINUTES
         value: "2"
       - key: RANGE_COOLDOWN_MINUTES
         value: "10"
       - key: CLIS_PER_CYCLE
-        value: "0"
+        value: "25"
       - key: STATE_FILE
         value: ./data/state.json
       - key: SELF_PING_ENABLED
         value: "true"
       - key: SELF_PING_URL
-        value: ""
+        value: https://lamix-cli-bot.onrender.com/healthz
       - key: SELF_PING_MINUTES
         value: "10"
       - key: TZ

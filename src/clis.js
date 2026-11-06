@@ -17,6 +17,10 @@ export function cleanCliList(list, { minLen = 2, maxLen = 30 } = {}) {
     if (cli.length < minLen || cli.length > maxLen) continue;
     // Drop pure separator artifacts like "---" (already stripped) and bare symbols
     if (!/[A-Za-z0-9]/.test(cli)) continue;
+    // Drop junk numeric senders (short numbers, OTP fragments like 12312) — they
+    // never match Lamix CLI search and waste the 429 budget.
+    if (/^[0-9]{2,7}$/.test(cli)) continue;
+    if (/^[0-9\-]{2,7}$/.test(cli)) continue;
     const key = cli.toLowerCase();
     if (!seen.has(key)) seen.set(key, cli);
   }
