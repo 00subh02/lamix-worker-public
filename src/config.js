@@ -77,7 +77,7 @@ export function loadConfig() {
     maxClis,
     clisPerCycle,
     pollSeconds: int("POLL_SECONDS", 10, { min: 10 }),
-    windowMinutes: int("WINDOW_MINUTES", 1440, { min: 1, max: 1440 }),
+    windowMinutes: int("WINDOW_MINUTES", 2, { min: 1, max: 1440 }),
     rangeCooldownMinutes: int("RANGE_COOLDOWN_MINUTES", 10, { min: 0, max: 1440 }),
     futureSkewSeconds: int("FUTURE_SKEW_SECONDS", 30, { min: 0 }),
     stateFile: optional("STATE_FILE", "./data/state.json"),
