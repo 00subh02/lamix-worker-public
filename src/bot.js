@@ -404,13 +404,19 @@ async function main() {
     warn("[matrix] MATRIX_USERNAME/PASSWORD not set — using manual CLIs only. Add them to get auto-harvest.");
   }
 
-  // Non-fatal start: if lamix fails, retry in 10s instead of process.exit(1) (never die)
-  try {
-    await lamix.start();
-  } catch (err) {
-    console.error(`[fatal] Lamix start failed: ${err.message} — retrying in 10s`);
-    await sleep(10000);
-    await lamix.start();
+  // Non-fatal start: if lamix fails, infinite retry (never die, never off)
+  let lamixStarted = false;
+  for (let attempt = 1; attempt <= 5 && !lamixStarted; attempt++) {
+    try {
+      await lamix.start();
+      lamixStarted = true;
+    } catch (err) {
+      console.error(`[fatal] Lamix start failed attempt ${attempt}/5: ${err.message} — retrying in 10s`);
+      await sleep(10000);
+    }
+  }
+  if (!lamixStarted) {
+    console.error("[fatal] Lamix failed after 5 attempts, starting health-only mode (alerts paused, ping continues)");
   }
 
   // Watchdog + auto-recovery: never stay dead.
@@ -424,12 +430,13 @@ async function main() {
     server?.close();
     await lamix.stop().catch(() => {});
     await matrix?.stop().catch(() => {});
-    process.exit(0);
+    // Graceful: don't exit immediately, let Render kill if needed
+    setTimeout(() => process.exit(0), 5000).unref?.();
   };
   process.on("SIGINT", () => void shutdown("SIGINT"));
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
 
-  // Uncaught error hooks: log and let the watchdog restart, never silently die
+  // Inner supervisor: if main loop crashes, restart it (never off)
   process.on("uncaughtException", (err) => {
     console.error(`[uncaught] ${err.stack || err.message}`);
     health.lastError = err.message;

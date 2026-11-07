@@ -107,13 +107,13 @@ export class LamixClient {
     const page = this.page;
     if (page.url().includes("/cli-search") && !this.isOnLoginPage()) return;
 
-    await page.goto(`${this.baseUrl}/cli-search`, { waitUntil: "commit", timeout: 30000 });
+    await page.goto(`${this.baseUrl}/cli-search`, { waitUntil: "commit", timeout: 45000 });
     if (this.isOnLoginPage()) {
       throw new AuthError("Session expired while opening CLI Search (redirected to login).");
     }
     await page
       .locator('input[placeholder*="full sender" i]')
-      .waitFor({ state: "visible", timeout: 20000 });
+      .waitFor({ state: "visible", timeout: 30000 });
   }
 
   /**
@@ -135,28 +135,32 @@ export class LamixClient {
     await input.fill(cli);
 
     let lastError = null;
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    // Priority CLIs get a longer timeout (Lark must never miss), rest get fast 12s
+    const isPriority = ["lark"].includes(String(cli).toLowerCase());
+    const timeoutMs = isPriority ? 30000 : 12000;
+    for (let attempt = 1; attempt <= 3; attempt++) {
       const responsePromise = page.waitForResponse(
         (response) =>
           response.url().includes("/api/cli-search") && response.request().method() === "GET",
-        { timeout: 15000 },
+        { timeout: timeoutMs },
       );
 
       const searchButton = page
         .locator("button")
         .filter({ hasText: /^\s*search\s*$/i })
         .first();
-      await searchButton.click();
+      await searchButton.click().catch(() => {});
 
       const response = await responsePromise.catch((e) => {
         lastError = e;
+        this.logger.warn(`[lamix] timeout on CLI "${cli}" attempt ${attempt}/3 (${Math.round(timeoutMs / 1000)}s)`);
         return null;
       });
       if (!response) continue;
       const status = response.status();
       if (status === 429) {
         // Fast-skip 429 — don't wait 30s, retry once after short 3s
-        this.logger.warn(`[lamix] rate-limited (429) on CLI "${cli}", attempt ${attempt}/2 — waiting 3s`);
+        this.logger.warn(`[lamix] rate-limited (429) on CLI "${cli}", attempt ${attempt}/3 — waiting 3s`);
         await sleep(3000);
         lastError = new Error("CLI search rate-limited (429)");
         try { await response.text().catch(() => {}); } catch {}
@@ -170,13 +174,13 @@ export class LamixClient {
         throw new Error(`CLI search for "${cli}" failed with HTTP ${status}`);
       }
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({ rows: [] }));
       const headerNow = Number(response.headers()["x-server-time"]);
       const dateNow = Date.parse(response.headers()["date"] || "");
       const serverNowMs = Number.isFinite(headerNow) && headerNow > 0 ? headerNow : Number.isFinite(dateNow) ? dateNow : Date.now();
 
-      // Gentle pacing to stay under Lamix rate-limit (429 every ~5 fast hits)
-      await sleep(1200);
+      // Gentle pacing — 1500ms balance (1000 too fast -> 429 storm, 2000 too slow)
+      await sleep(1500);
 
       return {
         cli,
@@ -186,7 +190,15 @@ export class LamixClient {
         serverNowMs,
       };
     }
-    throw lastError || new Error(`CLI search for "${cli}" failed after retries`);
+    // Never throw on timeout/429 after retries — return empty so cycle continues (never die)
+    this.logger.warn(`[lamix] CLI "${cli}" gave up after retries, returning empty`);
+    return {
+      cli,
+      rows: [],
+      windowHours: 24,
+      capped: false,
+      serverNowMs: Date.now(),
+    };
   }
 }
 
