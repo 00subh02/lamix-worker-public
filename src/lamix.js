@@ -124,7 +124,12 @@ export class LamixClient {
    */
   async searchCli(cli) {
     const page = this.page;
-    await this.gotoCliSearch();
+    try {
+      await this.gotoCliSearch();
+    } catch (err) {
+      if (String(err).includes("/cli-search")) throw err;
+      await this.gotoCliSearch();
+    }
 
     const input = page.locator('input[placeholder*="full sender" i]').first();
     await input.fill(cli);
@@ -134,7 +139,7 @@ export class LamixClient {
       const responsePromise = page.waitForResponse(
         (response) =>
           response.url().includes("/api/cli-search") && response.request().method() === "GET",
-        { timeout: 20000 },
+        { timeout: 15000 },
       );
 
       const searchButton = page
@@ -143,13 +148,16 @@ export class LamixClient {
         .first();
       await searchButton.click();
 
-      const response = await responsePromise;
+      const response = await responsePromise.catch((e) => {
+        lastError = e;
+        return null;
+      });
+      if (!response) continue;
       const status = response.status();
       if (status === 429) {
-        const retryAfter = Number(response.headers()["retry-after"] || 30);
-        const waitMs = Math.min(60000, (Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : 15) * 1000 * attempt);
-        this.logger.warn(`[lamix] rate-limited (429) on CLI "${cli}", attempt ${attempt}/3 — waiting ${Math.round(waitMs / 1000)}s`);
-        await sleep(waitMs);
+        // Fast-skip 429 — don't wait 30s, retry once after short 3s
+        this.logger.warn(`[lamix] rate-limited (429) on CLI "${cli}", attempt ${attempt}/2 — waiting 3s`);
+        await sleep(3000);
         lastError = new Error("CLI search rate-limited (429)");
         try { await response.text().catch(() => {}); } catch {}
         continue;
@@ -168,7 +176,7 @@ export class LamixClient {
       const serverNowMs = Number.isFinite(headerNow) && headerNow > 0 ? headerNow : Number.isFinite(dateNow) ? dateNow : Date.now();
 
       // Gentle pacing to stay under Lamix rate-limit (429 every ~5 fast hits)
-      await sleep(2000);
+      await sleep(1200);
 
       return {
         cli,

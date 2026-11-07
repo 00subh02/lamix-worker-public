@@ -176,14 +176,7 @@ async function runCycle(client) {
   const priorityClis = config.priorityClis ?? [];
   const prioritySet = new Set(priorityClis.map((c) => String(c).toLowerCase()));
 
-  // Build ordered list: priority CLIs first, then the rest alphabetically
-  const orderedAll = [...allClis];
-  // Ensure priority CLIs are in the store even if Matrix never returned them
-  for (const pc of priorityClis) {
-    if (!cliStore.clis.some((c) => String(c).toLowerCase() === String(pc).toLowerCase())) {
-      cliStore.merge([[pc]]);
-    }
-  }
+  // Build ordered list: priority CLIs first, then the rest
   const allFresh = [...cliStore.snapshot()].sort((a, b) => {
     const aP = prioritySet.has(String(a).toLowerCase()) ? 0 : 1;
     const bP = prioritySet.has(String(b).toLowerCase()) ? 0 : 1;
@@ -207,10 +200,10 @@ async function runCycle(client) {
   // Apply MAX_CLIS cap if set
   if (config.maxClis > 0 && batch.length > config.maxClis) batch = batch.slice(0, config.maxClis);
 
-  // Fast-path: check priority CLIs first and alert immediately, so Lark is
-  // effectively checked every cycle at the earliest possible moment (user wants
-  // "every second" — Lamix page load is ~4s so ~10s is the physical floor).
+  // Cycle timeout guard: never let one batch block >90s (band ho raha fix)
+  const cycleDeadline = Date.now() + 90000;
   async function checkCli(cli) {
+    if (Date.now() > cycleDeadline) throw new Error("Cycle deadline 90s exceeded");
     const result = await client.searchCli(cli);
     const { rows, serverNowMs } = result;
     const alerts = [];
@@ -307,12 +300,14 @@ function startHealthServer() {
     if (req.url === "/healthz" || req.url === "/health") {
       res.writeHead(200, { "content-type": "application/json" });
       const uptimeSeconds = Math.round((Date.now() - new Date(health.startedAt).getTime()) / 1000);
-      const healthy = !health.lastError && (!health.lastSuccessAt || Date.now() - new Date(health.lastSuccessAt).getTime() < 10 * 60 * 1000);
+      const healthy = !health.lastError && (!health.lastSuccessAt || Date.now() - new Date(health.lastSuccessAt).getTime() < 15 * 60 * 1000);
       res.end(JSON.stringify({
-        ok: healthy,
+        ok: true, // Always 200 for Render — liveness, not readiness
+        healthy,
         uptimeSeconds,
         uptimeHuman: `${Math.floor(uptimeSeconds / 3600)}h ${Math.floor((uptimeSeconds % 3600) / 60)}m ${uptimeSeconds % 60}s`,
         ...health,
+        okReason: healthy ? "healthy" : health.lastError || "degraded",
         clisTracked: cliStore.clis.length,
         windowMinutes: config.windowMinutes,
         pollSeconds: config.pollSeconds,
@@ -383,7 +378,8 @@ async function main() {
   let signal = null;
   if (config.signal.enabled) {
     signal = new SignalPulseClient({ baseUrl: config.signal.baseUrl, logger });
-    await refreshSignalIfNeeded(signal, true);
+    // Start signal refresh in background — don't block lamix startup (band ho raha fix)
+    refreshSignalIfNeeded(signal, true).catch((e) => warn(`[signal] initial refresh failed: ${e.message}`));
   }
 
   const lamix = new LamixClient({
@@ -408,7 +404,14 @@ async function main() {
     warn("[matrix] MATRIX_USERNAME/PASSWORD not set — using manual CLIs only. Add them to get auto-harvest.");
   }
 
-  try { await lamix.start(); } catch (err) { console.error(`[fatal] Lamix start failed: ${err.message}`); process.exit(1); }
+  // Non-fatal start: if lamix fails, retry in 10s instead of process.exit(1) (never die)
+  try {
+    await lamix.start();
+  } catch (err) {
+    console.error(`[fatal] Lamix start failed: ${err.message} — retrying in 10s`);
+    await sleep(10000);
+    await lamix.start();
+  }
 
   // Watchdog + auto-recovery: never stay dead.
   let running = true;
@@ -437,10 +440,13 @@ async function main() {
     health.lastError = err?.message || String(err);
   });
 
-  // Initial Matrix harvest (unless --scan-once requires it explicitly)
-  if (matrix) await refreshMatrixIfNeeded(matrix, true);
-  else cliStore.merge([config.manualClis]);
-  if (signal) await refreshSignalIfNeeded(signal, true);
+  // Initial Matrix harvest (unless --scan-once requires it explicitly) — non-blocking
+  if (matrix) {
+    refreshMatrixIfNeeded(matrix, true).catch((e) => warn(`[matrix] initial refresh failed: ${e.message}`));
+  } else cliStore.merge([config.manualClis]);
+  if (signal) {
+    refreshSignalIfNeeded(signal, true).catch((e) => warn(`[signal] initial refresh failed: ${e.message}`));
+  }
 
   if (config.scanOnce) {
     log(`[scan-once] CLIs saved: ${cliStore.clis.length} -> ${config.cliFile}`);
