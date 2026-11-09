@@ -1,6 +1,6 @@
 import http from "node:http";
 import { loadConfig } from "./config.js";
-import { LamixClient, AuthError, sleep } from "./lamix.js";
+import { LamixClient, AuthError, RateLimitError, sleep } from "./lamix.js";
 import { MatrixClient } from "./matrix.js";
 import { SignalPulseClient } from "./signal.js";
 import { State } from "./state.js";
@@ -29,6 +29,10 @@ const health = {
   lastSignalRefreshAt: null,
   signalError: null,
   telegramErrors: 0,
+  rateLimitHits: 0,
+  rateLimitedUntil: null,
+  searchesDone: 0,
+  last429At: null,
 };
 let chatIds = config.telegram.chatIds?.length ? [...config.telegram.chatIds] : config.telegram.chatId ? [config.telegram.chatId] : [];
 function log(m) { console.log(`[${new Date().toISOString()}] ${m}`); }
@@ -84,7 +88,7 @@ function buildMessage(cycles, total) {
     `${header} <b>${headerText}</b>`,
     `🕒 <b>${formatIstShort(nowMs)} IST</b> · ${new Date(nowMs + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10)}`,
     `┗━━━━━━━━━━━━━━━━━━━━━━━┛`,
-    `📌 <b>${checked} CLIs</b> live-checked · <b>${clisTracked}</b> tracked · ⚡ <b>10s</b> poll`,
+    `📌 <b>${checked} CLIs</b> live-checked · <b>${clisTracked}</b> tracked · ⚡ <b>${config.pollSeconds}s</b> poll`,
     `━━━━━━━━━━━━━━━━━━━━━━━`,
   ];
   // Sort: priority CLIs first, then by alert count desc
@@ -208,12 +212,13 @@ async function runCycle(client) {
   // Apply MAX_CLIS cap if set
   if (config.maxClis > 0 && batch.length > config.maxClis) batch = batch.slice(0, config.maxClis);
 
-  // Cycle timeout guard: never let one batch block >90s (band ho raha fix)
-  const cycleDeadline = Date.now() + 90000;
+  // Cycle timeout guard: never let one batch block past the deadline
+  const cycleDeadline = Date.now() + config.cycleSeconds * 1000;
   async function checkCli(cli) {
-    if (Date.now() > cycleDeadline) throw new Error("Cycle deadline 90s exceeded");
+    if (Date.now() > cycleDeadline) throw new Error("Cycle deadline exceeded");
     const result = await client.searchCli(cli);
     const { rows, serverNowMs } = result;
+    health.searchesDone += 1;
     const alerts = [];
     const cooldownMs = config.rangeCooldownMinutes * 60 * 1000;
     for (const row of rows) {
@@ -269,27 +274,46 @@ async function runCycle(client) {
   const priorityBatch = batch.filter((c) => prioritySet.has(String(c).toLowerCase()));
   const restBatch = batch.filter((c) => !prioritySet.has(String(c).toLowerCase()));
 
+  const markRateLimited = (err) => {
+    health.rateLimitHits = client.rateLimitHits ?? health.rateLimitHits;
+    health.last429At = client.last429At ?? new Date().toISOString();
+    health.rateLimitedUntil = new Date(Date.now() + (err.retryAfterSeconds ?? 300) * 1000).toISOString();
+    warn(`[rate-limit] ${err.message} — pausing searches until ${health.rateLimitedUntil}`);
+  };
+
   // 1) Priority fast-path (Lark every cycle)
   const priorityCycles = [];
+  let limited = false;
   for (const cli of priorityBatch) {
     try {
       const cycle = await checkCli(cli);
       priorityCycles.push(cycle);
     } catch (err) {
       if (err instanceof AuthError) throw err;
+      if (err instanceof RateLimitError) {
+        markRateLimited(err);
+        limited = true;
+        break;
+      }
       warn(`CLI "${cli}" failed: ${err.message}`);
     }
   }
   await sendAlerts(priorityCycles);
 
-  // 2) Rotate the rest
+  // 2) Rotate the rest — stop immediately when Lamix asks us to back off
   const cycles = [...priorityCycles];
   for (const cli of restBatch) {
+    if (limited) break;
     try {
       const cycle = await checkCli(cli);
       cycles.push(cycle);
     } catch (err) {
       if (err instanceof AuthError) throw err;
+      if (err instanceof RateLimitError) {
+        markRateLimited(err);
+        limited = true;
+        break;
+      }
       warn(`CLI "${cli}" failed: ${err.message}`);
     }
   }
@@ -321,6 +345,7 @@ function startHealthServer() {
         pollSeconds: config.pollSeconds,
         priorityClis: config.priorityClis,
         telegramChatIds: chatIds,
+        rateLimitedForSeconds: Math.max(0, Math.ceil(((health.rateLimitedUntil ? new Date(health.rateLimitedUntil).getTime() : 0) - Date.now()) / 1000)),
         memory: process.memoryUsage(),
       }));
       return;
@@ -396,6 +421,10 @@ async function main() {
     password: config.lamix.password,
     headless: config.headless,
     logger,
+    priorityClis: config.priorityClis,
+    searchPacingMs: config.searchPacingMs,
+    searchTimeoutMs: config.searchTimeoutMs,
+    priorityTimeoutMs: config.priorityTimeoutMs,
   });
 
   let matrix = null;
@@ -455,6 +484,11 @@ async function main() {
     health.lastError = err?.message || String(err);
   });
 
+  // Always seed manual + priority CLIs so Lark is checked from the first cycle,
+  // even when Matrix/SignalPulse harvesting is slow or unavailable.
+  cliStore.merge([config.manualClis, config.priorityClis]);
+  log(`[clis] pool loaded: ${cliStore.clis.length} CLI(s) (priority: ${config.priorityClis.join(", ") || "none"})`);
+
   // Initial Matrix harvest (unless --scan-once requires it explicitly) — non-blocking
   if (matrix) {
     refreshMatrixIfNeeded(matrix, true).catch((e) => warn(`[matrix] initial refresh failed: ${e.message}`));
@@ -511,9 +545,10 @@ async function main() {
     if (state.prune(Date.now()) > 0) state.save();
     if (config.once) break;
     const elapsed = Date.now() - startedAt;
-    // Smooth pacing: keep at least 5s gap between cycles to avoid 429 storms
-    const waitMs = Math.max(5000, config.pollSeconds * 1000 - elapsed);
-    await sleep(waitMs);
+    // Smooth pacing between cycles + honor Lamix 429 cool-down (never hammer a lockout)
+    const rateLimitWaitMs = lamix.rateLimitedForSeconds * 1000;
+    const waitMs = Math.max(5000, config.pollSeconds * 1000 - elapsed, rateLimitWaitMs);
+    await sleep(Math.min(waitMs, 10 * 60 * 1000));
   }
   await lamix.stop().catch(() => {});
   await matrix?.stop().catch(() => {});

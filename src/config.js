@@ -50,10 +50,16 @@ export function loadConfig() {
 
   const cliFile = optional("CLI_FILE", "./data/clis.json");
   const maxClis = int("MAX_CLIS", 0, { min: 0 }); // 0 = unlimited
-  const clisPerCycle = int("CLIS_PER_CYCLE", 15, { min: 0 }); // 0 = all each cycle
+  const clisPerCycle = int("CLIS_PER_CYCLE", 25, { min: 0 }); // 0 = all each cycle
   const matrixRefreshMinutes = int("MATRIX_REFRESH_MINUTES", 60, { min: 1, max: 1440 });
   const priorityClis = parseClis(process.env.PRIORITY_CLIS || "Lark");
   const searchWindowHours = int("SEARCH_WINDOW_HOURS", 24, { min: 1, max: 168 });
+
+  // Lamix pacing / rate-limit guard
+  const searchPacingMs = int("SEARCH_PACING_MS", 1500, { min: 400, max: 60000 });
+  const searchTimeoutMs = int("LAMIX_SEARCH_TIMEOUT_MS", 10000, { min: 3000, max: 60000 });
+  const priorityTimeoutMs = int("LAMIX_PRIORITY_TIMEOUT_MS", 20000, { min: 3000, max: 120000 });
+  const cycleSeconds = int("CYCLE_SECONDS", 75, { min: 15, max: 600 });
 
   // SignalPulse source (fast, no browser) — refreshed independently if enabled
   const signalEnabled = bool("SIGNAL_ENABLED", true);
@@ -88,6 +94,10 @@ export function loadConfig() {
     cliFile,
     maxClis,
     clisPerCycle,
+    searchPacingMs,
+    searchTimeoutMs,
+    priorityTimeoutMs,
+    cycleSeconds,
     pollSeconds: int("POLL_SECONDS", 10, { min: 10 }),
     windowMinutes: int("WINDOW_MINUTES", 5, { min: 1, max: 1440 }),
     rangeCooldownMinutes: int("RANGE_COOLDOWN_MINUTES", 10, { min: 0, max: 1440 }),
