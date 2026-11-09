@@ -33,6 +33,7 @@ const health = {
   rateLimitedUntil: null,
   searchesDone: 0,
   last429At: null,
+  paceMs: null,
 };
 let chatIds = config.telegram.chatIds?.length ? [...config.telegram.chatIds] : config.telegram.chatId ? [config.telegram.chatId] : [];
 function log(m) { console.log(`[${new Date().toISOString()}] ${m}`); }
@@ -219,6 +220,7 @@ async function runCycle(client) {
     const result = await client.searchCli(cli);
     const { rows, serverNowMs } = result;
     health.searchesDone += 1;
+    health.paceMs = client.gapMs ?? health.paceMs;
     const alerts = [];
     const cooldownMs = config.rangeCooldownMinutes * 60 * 1000;
     for (const row of rows) {
@@ -278,7 +280,8 @@ async function runCycle(client) {
     health.rateLimitHits = client.rateLimitHits ?? health.rateLimitHits;
     health.last429At = client.last429At ?? new Date().toISOString();
     health.rateLimitedUntil = new Date(Date.now() + (err.retryAfterSeconds ?? 300) * 1000).toISOString();
-    warn(`[rate-limit] ${err.message} — pausing searches until ${health.rateLimitedUntil}`);
+    health.paceMs = client.gapMs ?? health.paceMs;
+    warn(`[rate-limit] ${err.message} — pausing searches until ${health.rateLimitedUntil} (pace ${client.gapMs}ms)`);
   };
 
   // 1) Priority fast-path (Lark every cycle)

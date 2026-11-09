@@ -35,7 +35,11 @@ export class LamixClient {
     this.headless = headless;
     this.logger = logger;
     this.prioritySet = new Set((priorityClis || []).map((c) => String(c).trim().toLowerCase()));
-    this.searchPacingMs = Math.max(400, searchPacingMs);
+    this.minGapMs = Math.max(1200, Math.round(searchPacingMs / 3));
+    this.maxGapMs = 90000;
+    this.gapMs = Math.max(this.minGapMs, searchPacingMs);
+    this.nextSearchAt = 0;
+    this.successStreak = 0;
     this.searchTimeoutMs = Math.max(3000, searchTimeoutMs);
     this.priorityTimeoutMs = Math.max(this.searchTimeoutMs, priorityTimeoutMs);
     this.browser = null;
@@ -185,10 +189,30 @@ export class LamixClient {
   }
 
   async pace() {
-    const elapsed = Date.now() - this.lastSearchAt;
-    const wait = this.searchPacingMs - elapsed;
+    const now = Date.now();
+    const wait = this.nextSearchAt - now;
     if (wait > 0) await sleep(wait);
+    this.nextSearchAt = Math.max(now, this.nextSearchAt) + this.gapMs;
     this.lastSearchAt = Date.now();
+  }
+
+  /** Self-tuning rate governor: slow down on 429, speed up carefully on success. */
+  noteRateLimit(retryAfter) {
+    this.rateLimitHits += 1;
+    this.last429At = new Date().toISOString();
+    this.last429RetrySeconds = retryAfter;
+    this.blockedUntil = Date.now() + retryAfter * 1000;
+    this.nextSearchAt = this.blockedUntil;
+    this.gapMs = Math.min(this.maxGapMs, Math.max(8000, Math.round(this.gapMs * 2)));
+    this.successStreak = 0;
+  }
+
+  noteSuccess() {
+    this.successStreak += 1;
+    if (this.successStreak >= 25) {
+      this.successStreak = 0;
+      this.gapMs = Math.max(this.minGapMs, Math.round(this.gapMs * 0.85));
+    }
   }
 
   parseRetryAfter(response) {
@@ -239,6 +263,9 @@ export class LamixClient {
         await this.recoverPage();
       }
 
+      // Wait out the adaptive gap *before* firing the request.
+      await this.pace();
+
       const input = this.page.locator('input[placeholder*="full sender" i]').first();
       await input.waitFor({ state: "visible", timeout: 10000 });
 
@@ -270,12 +297,11 @@ export class LamixClient {
       const status = response.status();
       if (status === 429) {
         const retryAfter = this.parseRetryAfter(response);
-        this.rateLimitHits += 1;
-        this.last429At = new Date().toISOString();
-        this.last429RetrySeconds = retryAfter;
-        this.blockedUntil = Date.now() + retryAfter * 1000;
         await response.text().catch(() => {});
-        this.logger.warn(`[lamix] 429 rate-limited — pausing all searches for ${retryAfter}s`);
+        this.noteRateLimit(retryAfter);
+        this.logger.warn(
+          `[lamix] 429 rate-limited — pausing ${retryAfter}s, pace now ${this.gapMs}ms`,
+        );
         throw new RateLimitError(`Lamix rate-limited (429) — cool down ${retryAfter}s`, retryAfter);
       }
 
@@ -305,7 +331,7 @@ export class LamixClient {
             : Date.now();
 
       this.searchCount += 1;
-      await this.pace();
+      this.noteSuccess();
 
       return {
         cli,
@@ -318,7 +344,6 @@ export class LamixClient {
 
     // Never throw on timeout after retries — return empty so the cycle continues.
     this.logger.warn(`[lamix] CLI "${cli}" gave up after retries — returning empty`);
-    await this.pace();
     return {
       cli,
       rows: [],
