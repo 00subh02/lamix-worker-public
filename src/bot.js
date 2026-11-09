@@ -49,20 +49,18 @@ function formatAge(ageMs) {
   return `${m}m ${String(r).padStart(2, "0")}s ago`;
 }
 function formatUtc(ms) {
-  // India Odisha — Asia/Kolkata IST (same as IST, Odisha has no separate TZ)
   const ist = new Date(ms + 5.5 * 60 * 60 * 1000);
   const iso = ist.toISOString();
-  return `${iso.slice(11, 19)} IST (Odisha)`;
+  return `${iso.slice(11, 19)} IST`;
 }
 function formatIstDate(ms) {
-  // Odisha IST — Bhubaneswar / Kolkata (IST UTC+5:30, India se hai tum)
   const istMs = ms + 5.5 * 60 * 60 * 1000;
   const d = new Date(istMs);
   const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()];
   const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getUTCMonth()];
   const time = d.toISOString().slice(11, 19);
   const date = d.toISOString().slice(0, 10);
-  return `${time} IST (Odisha) · ${day} ${date} (${mon})`;
+  return `${time} IST · ${day} ${date} (${mon})`;
 }
 function formatIstShort(ms) {
   const d = new Date(ms + 5.5 * 60 * 60 * 1000);
@@ -84,7 +82,7 @@ function buildMessage(cycles, total) {
     `┏━━━━━━━━━━━━━━━━━━━━━━━┓`,
     `  <b>LAMIX CLI LIVE</b>  •  <b>0-${config.windowMinutes} MIN</b>`,
     `${header} <b>${headerText}</b>`,
-    `🕒 <b>${formatIstShort(nowMs)} IST (Odisha)</b> · ${new Date(nowMs + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10)}`,
+    `🕒 <b>${formatIstShort(nowMs)} IST</b> · ${new Date(nowMs + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10)}`,
     `┗━━━━━━━━━━━━━━━━━━━━━━━┛`,
     `📌 <b>${checked} CLIs</b> live-checked · <b>${clisTracked}</b> tracked · ⚡ <b>10s</b> poll`,
     `━━━━━━━━━━━━━━━━━━━━━━━`,
@@ -105,10 +103,10 @@ function buildMessage(cycles, total) {
       `━━━━━━━ ${emoji} <b>${escapeHtml(cycle.cli)}</b>${isPriority ? " ⭐ PRIORITY" : ""} ━━━━━━━`,
     );
     for (const a of cycle.alerts) {
-      lines.push(`  📍 <b>${escapeHtml(a.range)}</b>`, `     ⏱ <b>${formatAge(a.ageMs)}</b> (${formatIstShort(a.lastSeenMs)} IST Odisha)`);
+      lines.push(`  📍 <b>${escapeHtml(a.range)}</b>`, `     ⏱ <b>${formatAge(a.ageMs)}</b> (${formatIstShort(a.lastSeenMs)})`);
     }
   }
-  lines.push("", `━━━━━━━ <i>Source: lamix panel · ${config.windowMinutes} min · IST Odisha</i> ━━━━━━━`);
+  lines.push("", `━━━━━━━ <i>Source: lamix panel · ${config.windowMinutes} min</i> ━━━━━━━`);
   return lines.join("\n");
 }
 
