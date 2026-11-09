@@ -48,38 +48,48 @@ function formatAge(ageMs) {
   const m = Math.floor(s / 60), r = s % 60;
   return `${m}m ${String(r).padStart(2, "0")}s ago`;
 }
-function formatUtc(ms, { withDate = false } = {}) {
-  // User time = IST (Asia/Kolkata, UTC+5:30) — premium timeline, user local
+function formatUtc(ms) {
+  // India Odisha — Asia/Kolkata IST (same as IST, Odisha has no separate TZ)
   const ist = new Date(ms + 5.5 * 60 * 60 * 1000);
   const iso = ist.toISOString();
-  const body = withDate ? `${iso.replace("T", " ").slice(0, 19)} IST` : `${iso.slice(11, 19)} IST`;
-  return withDate ? `${body} · ${formatUtc(ist.getTime()).slice(0, 8)} UTC` : body;
+  return `${iso.slice(11, 19)} IST (Odisha)`;
 }
-function formatIstDate(ms, { withDate = true } = {}) {
+function formatIstDate(ms) {
+  // Odisha IST — Bhubaneswar / Kolkata (IST UTC+5:30, India se hai tum)
   const istMs = ms + 5.5 * 60 * 60 * 1000;
   const d = new Date(istMs);
   const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()];
   const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getUTCMonth()];
   const time = d.toISOString().slice(11, 19);
   const date = d.toISOString().slice(0, 10);
-  return `${time} IST · ${day} ${date} (${mon})`;
+  return `${time} IST (Odisha) · ${day} ${date} (${mon})`;
+}
+function formatIstShort(ms) {
+  const d = new Date(ms + 5.5 * 60 * 60 * 1000);
+  return `${d.toISOString().slice(11, 19)} IST`;
 }
 function buildMessage(cycles, total) {
   const nowMs = Math.max(...cycles.map((c) => c.serverNowMs));
   const clisTracked = cliStore.clis.length;
-  const lines = [
-    `━━━━━━━ <b>LAMIX CLI LIVE</b> ━━━━━━━`,
-    `🚨 <b>${total} FRESH HIT${total === 1 ? "" : "S"}</b> · last ${config.windowMinutes} min`,
-    `🕒 ${formatIstDate(nowMs)}`,
-    `📌 <b>${cycles.length} CLIs</b> checked · <b>${clisTracked} total</b> tracked`,
-  ];
-  // Sort: priority CLIs first, then by alert count desc
+  const checked = cycles.length;
+
   const prioritySet = new Set((config.priorityClis ?? []).map((c) => String(c).toLowerCase()));
   const hasPriorityHit = cycles.some(
     (c) => c.alerts.length > 0 && prioritySet.has(String(c.cli).toLowerCase()),
   );
-  const header = hasPriorityHit ? "🔥" : "🚨";
-  lines[1] = `${header} <b>${hasPriorityHit ? "PRIORITY HIT" : "FRESH HIT"}</b> — ${total} range${total === 1 ? "" : "s"} in last ${config.windowMinutes} min`;
+  const header = hasPriorityHit ? "🔥" : "⚡";
+  const headerText = hasPriorityHit ? "PRIORITY HIT — LARK" : `FRESH HIT — ${total} range${total === 1 ? "" : "s"} in last ${config.windowMinutes} min`;
+
+  const lines = [
+    `┏━━━━━━━━━━━━━━━━━━━━━━━┓`,
+    `  <b>LAMIX CLI LIVE</b>  •  <b>0-${config.windowMinutes} MIN</b>`,
+    `${header} <b>${headerText}</b>`,
+    `🕒 <b>${formatIstShort(nowMs)} IST (Odisha)</b> · ${new Date(nowMs + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10)}`,
+    `┗━━━━━━━━━━━━━━━━━━━━━━━┛`,
+    `📌 <b>${checked} CLIs</b> live-checked · <b>${clisTracked}</b> tracked · ⚡ <b>10s</b> poll`,
+    `━━━━━━━━━━━━━━━━━━━━━━━`,
+  ];
+  // Sort: priority CLIs first, then by alert count desc
   const sortedCycles = [...cycles].sort((a, b) => {
     const aP = prioritySet.has(String(a.cli).toLowerCase()) ? 0 : 1;
     const bP = prioritySet.has(String(b.cli).toLowerCase()) ? 0 : 1;
@@ -89,16 +99,16 @@ function buildMessage(cycles, total) {
   for (const cycle of sortedCycles) {
     if (!cycle.alerts.length) continue;
     const isPriority = prioritySet.has(String(cycle.cli).toLowerCase());
-    const emoji = isPriority ? "🔥" : "•";
+    const emoji = isPriority ? "🔥" : "📡";
     lines.push(
       "",
       `━━━━━━━ ${emoji} <b>${escapeHtml(cycle.cli)}</b>${isPriority ? " ⭐ PRIORITY" : ""} ━━━━━━━`,
     );
     for (const a of cycle.alerts) {
-      lines.push(`  📍 <b>${escapeHtml(a.range)}</b>`, `     ⏱ ${formatAge(a.ageMs)} · last seen ${formatIstDate(a.lastSeenMs)}`);
+      lines.push(`  📍 <b>${escapeHtml(a.range)}</b>`, `     ⏱ <b>${formatAge(a.ageMs)}</b> (${formatIstShort(a.lastSeenMs)} IST Odisha)`);
     }
   }
-  lines.push("", `━━━━━━━ <i>Source: lamix panel CLI Search · last ${config.windowMinutes} min</i> ━━━━━━━`);
+  lines.push("", `━━━━━━━ <i>Source: lamix panel · ${config.windowMinutes} min · IST Odisha</i> ━━━━━━━`);
   return lines.join("\n");
 }
 
