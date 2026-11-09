@@ -36,6 +36,7 @@ const health = {
   paceMs: null,
 };
 let chatIds = config.telegram.chatIds?.length ? [...config.telegram.chatIds] : config.telegram.chatId ? [config.telegram.chatId] : [];
+let hotClis = [];
 function log(m) { console.log(`[${new Date().toISOString()}] ${m}`); }
 function warn(m) { console.warn(`[${new Date().toISOString()}] ${m}`); }
 const logger = { info: log, warn, error: warn };
@@ -152,6 +153,7 @@ async function refreshMatrixIfNeeded(matrix, force = false) {
   try {
     await matrix.ensureSession().catch(async () => { await matrix.login(); });
     const result = await matrix.harvest();
+    hotClis = Array.isArray(result.liveFeed) ? result.liveFeed : [];
     const { added, total } = cliStore.merge([config.manualClis, result.all]);
     cliStore.setMeta({
       manual: config.manualClis,
@@ -202,12 +204,39 @@ async function runCycle(client) {
     const priorityInList = allFresh.filter((c) => prioritySet.has(String(c).toLowerCase()));
     const rest = allFresh.filter((c) => !prioritySet.has(String(c).toLowerCase()));
     const restPerCycle = Math.max(0, config.clisPerCycle - priorityInList.length);
-    const start = rest.length > 0 ? health.cliOffset % rest.length : 0;
+
+    // Prefer CLIs MatrixPanel currently reports as active: scarce Lamix searches
+    // hit senders that are actually live. Every 6th cycle rotates cold CLIs too.
+    const hotPool = hotClis.filter(
+      (c) => !prioritySet.has(String(c).toLowerCase()) && allClis.includes(c),
+    );
+    const useCold = hotPool.length === 0 || health.cycle % 6 === 0;
+    const restPool = useCold ? rest : hotPool;
+    const start = restPool.length > 0 ? health.cliOffset % restPool.length : 0;
     const restBatch = [];
-    for (let i = 0; i < Math.min(restPerCycle, rest.length); i++) restBatch.push(rest[(start + i) % rest.length]);
-    health.cliOffset = rest.length > 0 ? (start + restPerCycle) % rest.length : 0;
+    for (let i = 0; i < Math.min(restPerCycle, restPool.length); i++) {
+      restBatch.push(restPool[(start + i) % restPool.length]);
+    }
+    health.cliOffset = restPool.length > 0 ? (start + restPerCycle) % restPool.length : 0;
     batch = [...priorityInList, ...restBatch];
-    log(`[batch] searching ${batch.length}/${total} CLIs (priority ${priorityInList.join(",") || "none"} + ${restBatch.length} rotate, offset ${start} next=${health.cliOffset})`);
+    log(
+      `[batch] searching ${batch.length}/${total} CLIs (priority ${priorityInList.join(",") || "none"} + ${restBatch.length} ${useCold ? "cold" : "hot"} rotate, offset ${start} next=${health.cliOffset})`,
+    );
+  } else {
+    // No batching — priority first, then hot CLIs, then the rest.
+    const hotRank = new Map(hotClis.map((c, i) => [String(c).toLowerCase(), i]));
+    const restSorted = allFresh
+      .filter((c) => !prioritySet.has(String(c).toLowerCase()))
+      .sort((a, b) => {
+        const ar = hotRank.get(String(a).toLowerCase()) ?? Number.MAX_SAFE_INTEGER;
+        const br = hotRank.get(String(b).toLowerCase()) ?? Number.MAX_SAFE_INTEGER;
+        if (ar !== br) return ar - br;
+        return String(a).toLowerCase().localeCompare(String(b).toLowerCase());
+      });
+    batch = [
+      ...allFresh.filter((c) => prioritySet.has(String(c).toLowerCase())),
+      ...restSorted,
+    ];
   }
 
   // Apply MAX_CLIS cap if set
@@ -281,7 +310,8 @@ async function runCycle(client) {
     health.last429At = client.last429At ?? new Date().toISOString();
     health.rateLimitedUntil = new Date(Date.now() + (err.retryAfterSeconds ?? 300) * 1000).toISOString();
     health.paceMs = client.gapMs ?? health.paceMs;
-    warn(`[rate-limit] ${err.message} — pausing searches until ${health.rateLimitedUntil} (pace ${client.gapMs}ms)`);
+    health.cooldownMs = client.cooldownMs ?? health.cooldownMs;
+    warn(`[rate-limit] ${err.message} — pausing searches until ${health.rateLimitedUntil} (pace ${client.gapMs}ms, cooldown ${client.cooldownMs}ms)`);
   };
 
   // 1) Priority fast-path (Lark every cycle)
@@ -348,6 +378,7 @@ function startHealthServer() {
         pollSeconds: config.pollSeconds,
         priorityClis: config.priorityClis,
         telegramChatIds: chatIds,
+        hotClis: hotClis.length,
         rateLimitedForSeconds: Math.max(0, Math.ceil(((health.rateLimitedUntil ? new Date(health.rateLimitedUntil).getTime() : 0) - Date.now()) / 1000)),
         memory: process.memoryUsage(),
       }));

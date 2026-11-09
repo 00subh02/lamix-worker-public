@@ -40,6 +40,10 @@ export class LamixClient {
     this.gapMs = Math.max(this.minGapMs, searchPacingMs);
     this.nextSearchAt = 0;
     this.successStreak = 0;
+    // Cool-down probing: the panel sends retry-after:300 but recovers earlier.
+    // Start gentle, double on repeated 429s, reset after a good streak.
+    this.cooldownMs = 60000;
+    this.maxCooldownMs = 300000;
     this.searchTimeoutMs = Math.max(3000, searchTimeoutMs);
     this.priorityTimeoutMs = Math.max(this.searchTimeoutMs, priorityTimeoutMs);
     this.browser = null;
@@ -201,17 +205,21 @@ export class LamixClient {
     this.rateLimitHits += 1;
     this.last429At = new Date().toISOString();
     this.last429RetrySeconds = retryAfter;
-    this.blockedUntil = Date.now() + retryAfter * 1000;
+    const waitMs = Math.min(this.maxCooldownMs, Math.max(this.cooldownMs, 30000));
+    this.blockedUntil = Date.now() + waitMs;
     this.nextSearchAt = this.blockedUntil;
-    this.gapMs = Math.min(this.maxGapMs, Math.max(8000, Math.round(this.gapMs * 2)));
+    this.cooldownMs = Math.min(this.maxCooldownMs, Math.round(this.cooldownMs * 1.8));
+    this.gapMs = Math.min(this.maxGapMs, Math.max(8000, Math.round(this.gapMs * 1.6)));
     this.successStreak = 0;
+    this.lastCooldownMs = waitMs;
   }
 
   noteSuccess() {
     this.successStreak += 1;
-    if (this.successStreak >= 25) {
+    if (this.successStreak >= 8) {
       this.successStreak = 0;
-      this.gapMs = Math.max(this.minGapMs, Math.round(this.gapMs * 0.85));
+      this.cooldownMs = Math.max(45000, Math.round(this.cooldownMs * 0.7));
+      this.gapMs = Math.max(this.minGapMs, Math.round(this.gapMs * 0.9));
     }
   }
 
@@ -300,9 +308,12 @@ export class LamixClient {
         await response.text().catch(() => {});
         this.noteRateLimit(retryAfter);
         this.logger.warn(
-          `[lamix] 429 rate-limited — pausing ${retryAfter}s, pace now ${this.gapMs}ms`,
+          `[lamix] 429 rate-limited — pausing ${this.rateLimitedForSeconds}s, pace now ${this.gapMs}ms`,
         );
-        throw new RateLimitError(`Lamix rate-limited (429) — cool down ${retryAfter}s`, retryAfter);
+        throw new RateLimitError(
+          `Lamix rate-limited (429) — cool down ${this.rateLimitedForSeconds}s`,
+          this.rateLimitedForSeconds,
+        );
       }
 
       if (status === 401 || status === 403) {
