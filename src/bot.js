@@ -70,12 +70,15 @@ function formatIstDate(ms) {
 }
 function formatIstShort(ms) {
   const d = new Date(ms + 5.5 * 60 * 60 * 1000);
-  return `${d.toISOString().slice(11, 19)} IST`;
+  let hours = d.getUTCHours();
+  const ampm = hours >= 12 ? "PM" : "AM";
+  hours = hours % 12 || 12;
+  return `${hours}:${String(d.getUTCMinutes()).padStart(2, "0")} ${ampm} IST`;
 }
 function formatIstStamp(ms) {
   const d = new Date(ms + 5.5 * 60 * 60 * 1000);
   const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getUTCMonth()];
-  return `${String(d.getUTCDate()).padStart(2, "0")} ${mon} ${d.getUTCFullYear()} · ${d.toISOString().slice(11, 19)} IST`;
+  return `${String(d.getUTCDate()).padStart(2, "0")} ${mon} ${d.getUTCFullYear()} · ${formatIstShort(ms)}`;
 }
 function buildMessage(cycles, total) {
   const nowMs = Math.max(...cycles.map((c) => c.serverNowMs));
