@@ -52,7 +52,7 @@ function formatAge(ageMs) {
   const s = Math.max(0, Math.round(ageMs / 1000));
   if (s < 60) return `${s}s ago`;
   const m = Math.floor(s / 60), r = s % 60;
-  return `${m}m ${String(r).padStart(2, "0")}s ago`;
+  return r ? `${m}m ${String(r).padStart(2, "0")}s ago` : `${m}m ago`;
 }
 function formatUtc(ms) {
   const ist = new Date(ms + 5.5 * 60 * 60 * 1000);
@@ -72,6 +72,11 @@ function formatIstShort(ms) {
   const d = new Date(ms + 5.5 * 60 * 60 * 1000);
   return `${d.toISOString().slice(11, 19)} IST`;
 }
+function formatIstStamp(ms) {
+  const d = new Date(ms + 5.5 * 60 * 60 * 1000);
+  const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getUTCMonth()];
+  return `${String(d.getUTCDate()).padStart(2, "0")} ${mon} ${d.getUTCFullYear()} · ${d.toISOString().slice(11, 19)} IST`;
+}
 function buildMessage(cycles, total) {
   const nowMs = Math.max(...cycles.map((c) => c.serverNowMs));
   const clisTracked = cliStore.clis.length;
@@ -81,18 +86,7 @@ function buildMessage(cycles, total) {
   const hasPriorityHit = cycles.some(
     (c) => c.alerts.length > 0 && prioritySet.has(String(c.cli).toLowerCase()),
   );
-  const header = hasPriorityHit ? "🔥" : "⚡";
-  const headerText = hasPriorityHit ? "PRIORITY HIT — LARK" : `FRESH HIT — ${total} range${total === 1 ? "" : "s"} in last ${config.windowMinutes} min`;
 
-  const lines = [
-    `┏━━━━━━━━━━━━━━━━━━━━━━━┓`,
-    `  <b>LAMIX CLI LIVE</b>  •  <b>0-${config.windowMinutes} MIN</b>`,
-    `${header} <b>${headerText}</b>`,
-    `🕒 <b>${formatIstShort(nowMs)} IST</b> · ${new Date(nowMs + 5.5 * 60 * 60 * 1000).toISOString().slice(0, 10)}`,
-    `┗━━━━━━━━━━━━━━━━━━━━━━━┛`,
-    `📌 <b>${checked} CLIs</b> live-checked · <b>${clisTracked}</b> tracked · ⚡ <b>${config.pollSeconds}s</b> poll`,
-    `━━━━━━━━━━━━━━━━━━━━━━━`,
-  ];
   // Sort: priority CLIs first, then by alert count desc
   const sortedCycles = [...cycles].sort((a, b) => {
     const aP = prioritySet.has(String(a.cli).toLowerCase()) ? 0 : 1;
@@ -100,19 +94,39 @@ function buildMessage(cycles, total) {
     if (aP !== bP) return aP - bP;
     return (b.alerts.length || 0) - (a.alerts.length || 0);
   });
+
+  const rangeWord = total === 1 ? "RANGE" : "RANGES";
+  const cliWord = checked === 1 ? "CLI" : "CLIs";
+  const priorityNames = [...new Set(
+    cycles
+      .filter((c) => c.alerts.length && prioritySet.has(String(c.cli).toLowerCase()))
+      .map((c) => String(c.cli).toUpperCase()),
+  )];
+  const priorityLabel = priorityNames.length === 1 ? priorityNames[0] : "PRIORITY";
+
+  const lines = [
+    `🚨 <b>LAMIX CLI ALERT</b>`,
+    `<code>${formatIstStamp(nowMs)} · 0-${config.windowMinutes} MIN · ${total} ${rangeWord}</code>`,
+  ];
+  if (hasPriorityHit) lines.push(`<b>PRIORITY HIT — ${escapeHtml(priorityLabel)}</b>`);
+  lines.push("");
+
   for (const cycle of sortedCycles) {
     if (!cycle.alerts.length) continue;
-    const isPriority = prioritySet.has(String(cycle.cli).toLowerCase());
-    const emoji = isPriority ? "🔥" : "📡";
-    lines.push(
-      "",
-      `━━━━━━━ ${emoji} <b>${escapeHtml(cycle.cli)}</b>${isPriority ? " ⭐ PRIORITY" : ""} ━━━━━━━`,
-    );
+    lines.push(`<b>CLI:</b> ${escapeHtml(cycle.cli)}`);
     for (const a of cycle.alerts) {
-      lines.push(`  📍 <b>${escapeHtml(a.range)}</b>`, `     ⏱ <b>${formatAge(a.ageMs)}</b> (${formatIstShort(a.lastSeenMs)})`);
+      lines.push(
+        `<b>Range:</b> ${escapeHtml(a.range)}`,
+        `<b>Time:</b> ${formatAge(a.ageMs)} · ${formatIstShort(a.lastSeenMs)}`,
+      );
     }
+    lines.push("");
   }
-  lines.push("", `━━━━━━━ <i>Source: lamix panel · ${config.windowMinutes} min</i> ━━━━━━━`);
+
+  lines.push(
+    `<code>Source: lamix panel · 0-${config.windowMinutes} min`,
+    `${checked} ${cliWord} checked · ${clisTracked} tracked · ${config.pollSeconds}s poll</code>`,
+  );
   return lines.join("\n");
 }
 
