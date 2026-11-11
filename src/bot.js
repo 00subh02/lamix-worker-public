@@ -106,26 +106,28 @@ function buildMessage(cycles, total) {
 
   const lines = [
     `🚨 <b>LAMIX CLI ALERT</b>`,
-    `<code>${formatIstStamp(nowMs)} · 0-${config.windowMinutes} MIN · ${total} ${rangeWord}</code>`,
+    `${formatIstStamp(nowMs)} · 0-${config.windowMinutes} MIN · ${total} ${rangeWord}`,
   ];
   if (hasPriorityHit) lines.push(`<b>PRIORITY HIT — ${escapeHtml(priorityLabel)}</b>`);
   lines.push("");
 
   for (const cycle of sortedCycles) {
     if (!cycle.alerts.length) continue;
-    lines.push(`<b>CLI:</b> ${escapeHtml(cycle.cli)}`);
-    for (const a of cycle.alerts) {
+    const multi = cycle.alerts.length > 1;
+    lines.push(`<b>CLI:</b> <code>${escapeHtml(cycle.cli)}</code>`);
+    cycle.alerts.forEach((a, i) => {
+      const num = multi ? `${i + 1}. ` : "";
       lines.push(
-        `<b>Range:</b> ${escapeHtml(a.range)}`,
+        `<b>${num}Range:</b> <code>${escapeHtml(a.range)}</code>`,
         `<b>Time:</b> ${formatAge(a.ageMs)} · ${formatIstShort(a.lastSeenMs)}`,
       );
-    }
+    });
     lines.push("");
   }
 
   lines.push(
-    `<code>Source: lamix panel · 0-${config.windowMinutes} min`,
-    `${checked} ${cliWord} checked · ${clisTracked} tracked · ${config.pollSeconds}s poll</code>`,
+    `Source: lamix panel · 0-${config.windowMinutes} min`,
+    `${checked} ${cliWord} checked · ${clisTracked} tracked · ${config.pollSeconds}s poll`,
   );
   return lines.join("\n");
 }
