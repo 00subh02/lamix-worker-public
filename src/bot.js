@@ -23,6 +23,7 @@ const health = {
   matrixError: null,
   cliCount: 0,
   cliOffset: 0,
+  freshOffset: 0,
   lamixRestarts: 0,
   matrixRestarts: 0,
   signalRestarts: 0,
@@ -37,6 +38,28 @@ const health = {
 };
 let chatIds = config.telegram.chatIds?.length ? [...config.telegram.chatIds] : config.telegram.chatId ? [config.telegram.chatId] : [];
 let hotClis = [];
+let signalHotClis = [];
+let signalFreshClis = [];
+let signalRefreshing = false;
+function uniqLower(list) {
+  const seen = new Set();
+  const out = [];
+  for (const cli of list) {
+    const key = String(cli ?? "").toLowerCase();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(cli);
+  }
+  return out;
+}
+/** Merge Matrix live-feed CLIs with SignalPulse-ranked fresh CLIs (SignalPulse first). */
+function combinedHotClis() {
+  return uniqLower([...signalHotClis, ...hotClis]);
+}
+/** CLIs that both sources saw activity from in the last few minutes. */
+function combinedFreshClis() {
+  return uniqLower([...signalFreshClis, ...hotClis]);
+}
 function log(m) { console.log(`[${new Date().toISOString()}] ${m}`); }
 function warn(m) { console.warn(`[${new Date().toISOString()}] ${m}`); }
 const logger = { info: log, warn, error: warn };
@@ -136,22 +159,34 @@ function buildMessage(cycles, total) {
 }
 
 async function refreshSignalIfNeeded(signal, force = false) {
+  if (!config.signal.enabled) return;
+  if (signalRefreshing) return;
   const nowMs = Date.now();
   const last = health.lastSignalRefreshAt ? new Date(health.lastSignalRefreshAt).getTime() : 0;
   if (!force && nowMs - last < config.signal.refreshMinutes * 60 * 1000) return;
-  if (!config.signal.enabled) return;
+  signalRefreshing = true;
   log(`[signal] refreshing CLI list (every ${config.signal.refreshMinutes} min)`);
   try {
     const result = await signal.harvest();
+    signalHotClis = Array.isArray(result.hot) ? result.hot : [];
+    signalFreshClis = Array.isArray(result.fresh) ? result.fresh : [];
     const { added, total } = cliStore.merge([result.all]);
     cliStore.setMeta({ ...cliStore.meta, signal: result.meta, lastSignalAdded: added, lastSignalTotal: total });
     health.lastSignalRefreshAt = new Date().toISOString();
     health.signalError = null;
-    log(`[signal] harvest done — ${total} unique CLIs (added ${added})`);
+    health.signalClis = result.all.length;
+    health.signalHotClis = signalHotClis.length;
+    health.cliCount = total;
+    log(
+      `[signal] harvest done — ${result.all.length} source CLIs (${result.meta?.numeric ?? 0} numeric), ` +
+        `${signalHotClis.length} hot · store ${total} unique (added ${added})`,
+    );
   } catch (err) {
     health.signalError = err.message;
     warn(`[signal] refresh failed: ${err.message}`);
     health.lastSignalRefreshAt = new Date().toISOString();
+  } finally {
+    signalRefreshing = false;
   }
 }
 
@@ -224,26 +259,47 @@ async function runCycle(client) {
     const rest = allFresh.filter((c) => !prioritySet.has(String(c).toLowerCase()));
     const restPerCycle = Math.max(0, config.clisPerCycle - priorityInList.length);
 
-    // Prefer CLIs MatrixPanel currently reports as active: scarce Lamix searches
-    // hit senders that are actually live. Every 6th cycle rotates cold CLIs too.
-    const hotPool = hotClis.filter(
-      (c) => !prioritySet.has(String(c).toLowerCase()) && allClis.includes(c),
-    );
+    // Split the pool into tiers so live senders get checked far more often:
+    //   fresh = activity in the last ~5 min (65% of the batch)
+    //   hot   = recently active, ranked by volume (remaining 35%)
+    //   cold  = full pool rotation, every 6th cycle so nothing is forgotten
+    const allLower = new Set(allClis.map((c) => String(c).toLowerCase()));
+    const usable = (c) => !prioritySet.has(String(c).toLowerCase()) && allLower.has(String(c).toLowerCase());
+    const hotPool = combinedHotClis().filter(usable);
+    const freshSet = new Set(combinedFreshClis().map((c) => String(c).toLowerCase()));
+    const freshPool = hotPool.filter((c) => freshSet.has(String(c).toLowerCase()));
+    const warmPool = hotPool.filter((c) => !freshSet.has(String(c).toLowerCase()));
+
+    const take = (pool, count, key) => {
+      if (count <= 0 || pool.length === 0) return [];
+      const start = (health[key] ?? 0) % pool.length;
+      const out = [];
+      for (let i = 0; i < Math.min(count, pool.length); i++) out.push(pool[(start + i) % pool.length]);
+      health[key] = (start + Math.min(count, pool.length)) % pool.length;
+      return out;
+    };
+
     const useCold = hotPool.length === 0 || health.cycle % 6 === 0;
-    const restPool = useCold ? rest : hotPool;
-    const start = restPool.length > 0 ? health.cliOffset % restPool.length : 0;
-    const restBatch = [];
-    for (let i = 0; i < Math.min(restPerCycle, restPool.length); i++) {
-      restBatch.push(restPool[(start + i) % restPool.length]);
+    let restBatch = [];
+    let mode = "cold";
+    if (!useCold) {
+      const freshQuota = freshPool.length ? Math.ceil(restPerCycle * 0.65) : 0;
+      const freshBatch = take(freshPool, freshQuota, "freshOffset");
+      const restQuota = restPerCycle - freshBatch.length;
+      const warmBatch = take(warmPool.length ? warmPool : hotPool, restQuota, "cliOffset");
+      restBatch = [...freshBatch, ...warmBatch];
+      mode = `fresh ${freshBatch.length} + hot ${warmBatch.length}`;
+    } else {
+      restBatch = take(rest, restPerCycle, "cliOffset");
     }
-    health.cliOffset = restPool.length > 0 ? (start + restPerCycle) % restPool.length : 0;
     batch = [...priorityInList, ...restBatch];
     log(
-      `[batch] searching ${batch.length}/${total} CLIs (priority ${priorityInList.join(",") || "none"} + ${restBatch.length} ${useCold ? "cold" : "hot"} rotate, offset ${start} next=${health.cliOffset})`,
+      `[batch] searching ${batch.length}/${total} CLIs (priority ${priorityInList.join(",") || "none"} + ${mode} · ` +
+        `fresh ${freshPool.length} / hot ${hotPool.length} / cold ${rest.length} · next fresh=${health.freshOffset} hot=${health.cliOffset})`,
     );
   } else {
     // No batching — priority first, then hot CLIs, then the rest.
-    const hotRank = new Map(hotClis.map((c, i) => [String(c).toLowerCase(), i]));
+    const hotRank = new Map(combinedHotClis().map((c, i) => [String(c).toLowerCase(), i]));
     const restSorted = allFresh
       .filter((c) => !prioritySet.has(String(c).toLowerCase()))
       .sort((a, b) => {
@@ -397,7 +453,9 @@ function startHealthServer() {
         pollSeconds: config.pollSeconds,
         priorityClis: config.priorityClis,
         telegramChatIds: chatIds,
-        hotClis: hotClis.length,
+        hotClis: combinedHotClis().length,
+        matrixHotClis: hotClis.length,
+        signalHotClis: signalHotClis.length,
         rateLimitedForSeconds: Math.max(0, Math.ceil(((health.rateLimitedUntil ? new Date(health.rateLimitedUntil).getTime() : 0) - Date.now()) / 1000)),
         memory: process.memoryUsage(),
       }));
@@ -438,7 +496,11 @@ function startSelfPing() {
 }
 
 async function main() {
-  log(`starting Lamix CLI bot | CLIs source: ${config.matrix.enabled ? "Matrix + manual" : "manual only"}`);
+  log(`starting Lamix CLI bot | CLIs source: ${[
+    config.matrix.enabled ? "Matrix" : null,
+    config.signal.enabled ? "SignalPulse" : null,
+    "manual",
+  ].filter(Boolean).join(" + ")}`);
   log(`poll ${config.pollSeconds}s · window ${config.windowMinutes} min · cooldown ${config.rangeCooldownMinutes} min · matrix refresh ${config.matrix.refreshMinutes} min`);
   log(`CLI file: ${config.cliFile} · State file: ${config.stateFile}${config.dryRun ? " · DRY RUN" : ""}`);
 
@@ -570,7 +632,9 @@ async function main() {
         restartRequested = false;
       }
       if (matrix) await refreshMatrixIfNeeded(matrix, false);
-      if (signal) await refreshSignalIfNeeded(signal, false);
+      // SignalPulse refresh is HTTP-only; run it in the background so a slow
+      // download never delays Lamix searches (hot list updates atomically).
+      if (signal) refreshSignalIfNeeded(signal, false).catch((e) => warn(`[signal] refresh failed: ${e.message}`));
       await runCycle(lamix);
       health.lastSuccessAt = new Date().toISOString();
       health.lastError = null;

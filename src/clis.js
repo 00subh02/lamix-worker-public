@@ -17,14 +17,9 @@ export function cleanCliList(list, { minLen = 2, maxLen = 30 } = {}) {
     if (cli.length < minLen || cli.length > maxLen) continue;
     // Drop pure separator artifacts like "---" (already stripped) and bare symbols
     if (!/[A-Za-z0-9]/.test(cli)) continue;
-    // Drop junk numeric senders (short numbers, OTP fragments like 12312) — they
-    // never match Lamix CLI search and waste the 429 budget.
-    if (/^[0-9]{2,7}$/.test(cli)) continue;
-    if (/^[0-9\-]{2,7}$/.test(cli)) continue;
-    // Drop long numeric phone-like senders with leading 0/00 — almost always noise
-    // from failed-messages rows[].from (e.g. 0123456789, 00...). Keep +49-style real senders
-    // only if they look like a full E.164 number.
-    if (/^0[0-9]{6,}$/.test(cli)) continue;
+    // Keep numeric senders too (short codes like "5844" and full numbers like
+    // "447873077777") — Lamix/Matrix both expose numeric CLIs and they are
+    // real, searchable senders. Nothing is dropped on numeric shape anymore.
     const key = cli.toLowerCase();
     if (!seen.has(key)) seen.set(key, cli);
   }
