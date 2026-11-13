@@ -77,20 +77,6 @@ function formatAge(ageMs) {
   const m = Math.floor(s / 60), r = s % 60;
   return r ? `${m}m ${String(r).padStart(2, "0")}s ago` : `${m}m ago`;
 }
-function formatUtc(ms) {
-  const ist = new Date(ms + 5.5 * 60 * 60 * 1000);
-  const iso = ist.toISOString();
-  return `${iso.slice(11, 19)} IST`;
-}
-function formatIstDate(ms) {
-  const istMs = ms + 5.5 * 60 * 60 * 1000;
-  const d = new Date(istMs);
-  const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()];
-  const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getUTCMonth()];
-  const time = d.toISOString().slice(11, 19);
-  const date = d.toISOString().slice(0, 10);
-  return `${time} IST · ${day} ${date} (${mon})`;
-}
 function formatIstShort(ms) {
   const d = new Date(ms + 5.5 * 60 * 60 * 1000);
   let hours = d.getUTCHours();

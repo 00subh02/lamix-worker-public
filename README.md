@@ -75,35 +75,41 @@ LAMIX_CLIS=Lark,Telegram,WhatsApp
 
 ---
 
-## 3. Deploy on Render
+## 3. Deploy on a VPS (current production path)
 
-This repo includes `render.yaml` and a `Dockerfile` based on the official Playwright image,
-so Chromium and its system libraries are already installed.
+The repo ships a Playwright-based `Dockerfile`, so Chromium and its system libraries are already installed.
 
-1. Push this folder to a GitHub repository (keep `.env` out of git – it is in `.gitignore`).
-2. In Render: **New → Blueprint**, connect the repo. Render reads `render.yaml`.
-3. Fill the secret env vars when prompted:
-   - `LAMIX_USERNAME` – `Devil_RyomenSuk`
-   - `LAMIX_PASSWORD` – your panel password
-   - `LAMIX_CLIS` – e.g. `Lark`
-   - `TELEGRAM_BOT_TOKEN`
-   - `TELEGRAM_CHAT_ID`
-4. Deploy. It runs as a **Background Worker** (always on, no HTTP port needed).
+```bash
+cd /opt/lamix-cli-bot/lamix-cli-bot
+git pull --ff-only
+docker build -t lamix-cli-bot .
 
-`render.yaml` also mounts a 1 GB disk at `/data` and sets `STATE_FILE=/data/state.json`, so
-dedupe state survives restarts. Disks require a paid instance type; on a free setup remove the
-`disk` block and the bot still works, but it may resend a hit once after a redeploy.
+# Docker does not re-read .env on `docker restart`. After editing .env, recreate the container.
+docker rm -f lamix-bot
+docker run -d --name lamix-bot \
+  --restart always \
+  --env-file .env \
+  -v /opt/lamix-data:/app/data \
+  -p 10000:10000 \
+  lamix-cli-bot
+```
 
-### Alternative: Render Web Service (free tier)
+Useful checks:
 
-Free web services sleep after inactivity, which stops a monitor. If you still want one:
+```bash
+docker ps --filter name=lamix-bot
+docker logs --tail 80 lamix-bot
+curl http://127.0.0.1:10000/healthz
+```
 
-- Change `type: worker` to `type: web` and `plan: starter` to `plan: free` in `render.yaml`.
-- Set `PORT=10000` (Render sets `PORT` automatically for web services). The bot starts a small
-  health endpoint at `/healthz` when `PORT` is set.
-- Keep an external uptime pinger hitting `/healthz` every 5 minutes, otherwise Render will sleep.
+The bot needs:
+- `TELEGRAM_BOT_TOKEN` and at least one chat id in `TELEGRAM_CHAT_ID` (comma-separated).
+- `/opt/lamix-data:/app/data` so the CLI pool and alert dedupe state survive redeploys.
+- A small health endpoint at `/healthz` when `PORT` is set.
 
-A paid Background Worker is the recommended setup for 24/7 monitoring.
+### Legacy Render notes
+
+`render.yaml` is still present for reference, but Render's free tier sleeps and is not suitable for 24/7 monitoring. If you use Render, keep `/data/state.json` on a persistent disk to avoid duplicate alerts.
 
 ---
 
@@ -114,14 +120,23 @@ A paid Background Worker is the recommended setup for 24/7 monitoring.
 | `LAMIX_BASE_URL` | `https://panel.lamix.org` | Panel base URL |
 | `LAMIX_USERNAME` | – | Panel username |
 | `LAMIX_PASSWORD` | – | Panel password |
-| `LAMIX_CLIS` | – | Comma separated CLIs, e.g. `Lark,Telegram` |
+| `LAMIX_CLIS` | – | Comma separated high-priority CLIs, e.g. `Lark` |
+| `PRIORITY_CLIS` | `Lark` | CLIs searched first every cycle |
 | `TELEGRAM_BOT_TOKEN` | – | BotFather token |
-| `TELEGRAM_CHAT_ID` | – | Group/channel id (e.g. `-100...`) |
-| `POLL_SECONDS` | `30` | Seconds between checks (minimum 10) |
-| `WINDOW_MINUTES` | `2` | Alert if `lastSeen` is within this many minutes |
+| `TELEGRAM_CHAT_ID` | – | Group/channel id(s) (e.g. `-100...,-100...`) |
+| `POLL_SECONDS` | `10` | Seconds between checks (minimum 10) |
+| `WINDOW_MINUTES` | `5` | Alert if `lastSeen` is within this many minutes |
 | `RANGE_COOLDOWN_MINUTES` | `10` | Mute the same CLI+range for this long after an alert |
+| `CLIS_PER_CYCLE` | `12` | CLIs per cycle after priority+fresh/hot selection |
+| `SEARCH_PACING_MS` | `4000` | Base pacing between searches; adaptive 429 control overrides it |
+| `CYCLE_SECONDS` | `300` | Per-cycle safety deadline |
 | `FUTURE_SKEW_SECONDS` | `30` | Tolerate small clock differences on the panel |
-| `STATE_FILE` | `./data/state.json` | Dedupe file (use `/data/state.json` on Render) |
+| `MATRIX_ENABLED` | `true` | Harvest MatrixPanel CLI pool |
+| `MATRIX_REFRESH_MINUTES` | `60` | Re-harvest Matrix live feed interval |
+| `SIGNAL_ENABLED` | `true` | Harvest SignalPulse CLI telemetry |
+| `SIGNAL_REFRESH_MINUTES` | `5` | Re-rank SignalPulse fresh/hot CLIs |
+| `STATE_FILE` | `./data/state.json` | Dedupe file (use a persistent path in production) |
+| `CLI_FILE` | `./data/clis.json` | Persistent CLI pool |
 | `HEADLESS` | `true` | Set `false` to watch the browser locally while debugging |
 | `DRY_RUN` | `false` | Print messages instead of sending them |
 
@@ -142,8 +157,9 @@ A paid Background Worker is the recommended setup for 24/7 monitoring.
 | Panel stays on the login page | The account may be locked, or the panel is blocking the datacenter IP. Try `HEADLESS=false` locally to see the page. |
 | `CLI search rejected (401)` | The session expired; the bot re-logs in automatically on the next cycle. If it repeats, the panel changed its anti-automation checks. |
 | No Telegram message | Run with `DRY_RUN=true` to confirm the rule fires, then check the token/chat id. The bot logs `Telegram bot: @name` at startup. |
-| Duplicate alerts after redeploy | Attach the Render disk and keep `STATE_FILE=/data/state.json`. |
-| Bot works locally but not on Render | Datacenter IPs are more likely to be flagged. Try another region, or run it on your own PC/VPS. |
+| Duplicate alerts after redeploy | Keep `STATE_FILE=/data/state.json` on the persistent `/data` volume; `state.json` stores alert dedupe across restarts. |
+| Bot works locally but not on VPS | Datacenter IPs may be more visible to the panel. Watch `/healthz`, `docker logs`, and retry from another region if the panel starts rejecting the session. |
+| GitHub history still shows old credentials | Rotate every credential that was ever committed to this repository, including the Lamix, Matrix, Telegram bot token, and VPS root password. |
 
 ---
 

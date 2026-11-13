@@ -62,7 +62,7 @@ export class CliStore {
   }
 
   save() {
-    if (!this.file) return;
+    if (!this.file) return false;
     try {
       const dir = path.dirname(this.file);
       fs.mkdirSync(dir, { recursive: true });
@@ -76,14 +76,16 @@ export class CliStore {
       fs.writeFileSync(tmp, JSON.stringify(payload, null, 2));
       fs.renameSync(tmp, this.file);
       this.updatedAt = payload.updatedAt;
+      return true;
     } catch (err) {
       this.logger.warn(`[cli-store] could not save ${this.file}: ${err.message}`);
+      return false;
     }
   }
 
   /**
    * Merge sources. Each source is an array of raw CLI strings.
-   * Returns { added, total }.
+   * Returns { added: number, total: number }.
    */
   merge(sources) {
     const before = new Set(this.clis.map((c) => c.toLowerCase()));
@@ -93,12 +95,14 @@ export class CliStore {
       this.clis = merged;
       this.save();
     }
-    return { added, total: this.clis.length };
+    return { added: added.length, total: this.clis.length };
   }
 
   setMeta(patch) {
-    this.meta = { ...this.meta, ...patch };
-    this.save();
+    const next = { ...this.meta, ...patch };
+    if (JSON.stringify(next) === JSON.stringify(this.meta)) return false;
+    this.meta = next;
+    return this.save();
   }
 
   snapshot() {
