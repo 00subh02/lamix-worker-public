@@ -268,8 +268,8 @@ async function runCycle(client) {
     const restPerCycle = Math.max(0, config.clisPerCycle - priorityInList.length);
 
     // Split the pool into tiers so live senders get checked far more often:
-    //   fresh = activity in the last ~5 min (65% of the batch)
-    //   hot   = recently active, ranked by volume (remaining 35%)
+    //   fresh = activity in the last ~5 min (half of the batch)
+    //   hot   = recently active, ranked by volume (remaining half)
     //   cold  = full pool rotation, every 6th cycle so nothing is forgotten
     const allLower = new Set(allClis.map((c) => String(c).toLowerCase()));
     const usable = (c) => !prioritySet.has(String(c).toLowerCase()) && allLower.has(String(c).toLowerCase());
@@ -291,7 +291,7 @@ async function runCycle(client) {
     let restBatch = [];
     let mode = "cold";
     if (!useCold) {
-      const freshQuota = freshPool.length ? Math.ceil(restPerCycle * 0.65) : 0;
+      const freshQuota = freshPool.length ? Math.ceil(restPerCycle * 0.5) : 0;
       const freshBatch = take(freshPool, freshQuota, "freshOffset");
       const restQuota = restPerCycle - freshBatch.length;
       const warmBatch = take(warmPool.length ? warmPool : hotPool, restQuota, "cliOffset");
