@@ -9,6 +9,21 @@ export function normalizeCli(raw) {
   return String(raw ?? "").trim().replace(/\s+/g, " ").replace(/^[^A-Za-z0-9]+|[^A-Za-z0-9 ]+$/g, "").trim();
 }
 
+/** Same cleaning rules as cleanCliList, but keeps the caller's priority order. */
+export function cleanOrderedCliList(list) {
+  const seen = new Set();
+  const out = [];
+  for (const item of list ?? []) {
+    const cli = normalizeCli(item);
+    if (!cli || cli.length < 2 || cli.length > 30 || !/[A-Za-z0-9]/.test(cli)) continue;
+    const key = cli.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(cli);
+  }
+  return out;
+}
+
 export function cleanCliList(list, { minLen = 2, maxLen = 30 } = {}) {
   const seen = new Map(); // lower -> original
   for (const item of list ?? []) {

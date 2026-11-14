@@ -42,6 +42,9 @@ let hotClis = [];
 let signalHotClis = [];
 let signalFreshClis = [];
 let signalRefreshing = false;
+let matrixHotClis = [];
+let matrixFreshClis = [];
+let matrixRefreshing = false;
 function uniqLower(list) {
   const seen = new Set();
   const out = [];
@@ -53,13 +56,17 @@ function uniqLower(list) {
   }
   return out;
 }
-/** Merge Matrix live-feed CLIs with SignalPulse-ranked fresh CLIs (SignalPulse first). */
-function combinedHotClis() {
-  return uniqLower([...signalHotClis, ...hotClis]);
+function rebuildHotClis() {
+  // Fresh announcements / recent failed traffic are checked first, then the
+  // overall live hot list, and only then the much broader SignalPulse corpus.
+  hotClis = uniqLower([...matrixFreshClis, ...matrixHotClis, ...signalHotClis]);
 }
-/** CLIs that both sources saw activity from in the last few minutes. */
+/** Fresh = Matrix announcements or very recent failed traffic; Signal first only when enabled. */
+function combinedHotClis() {
+  return uniqLower([...matrixFreshClis, ...matrixHotClis, ...signalHotClis]);
+}
 function combinedFreshClis() {
-  return uniqLower([...signalFreshClis, ...hotClis]);
+  return uniqLower([...matrixFreshClis, ...signalFreshClis]);
 }
 function log(m) { console.log(`[${new Date().toISOString()}] ${m}`); }
 function warn(m) { console.warn(`[${new Date().toISOString()}] ${m}`); }
@@ -157,6 +164,7 @@ async function refreshSignalIfNeeded(signal, force = false) {
     const result = await signal.harvest();
     signalHotClis = Array.isArray(result.hot) ? result.hot : [];
     signalFreshClis = Array.isArray(result.fresh) ? result.fresh : [];
+    rebuildHotClis();
     const { added, total } = cliStore.merge([result.all]);
     cliStore.setMeta({ ...cliStore.meta, signal: result.meta, lastSignalAdded: added, lastSignalTotal: total });
     health.lastSignalRefreshAt = new Date().toISOString();
@@ -180,6 +188,7 @@ async function refreshSignalIfNeeded(signal, force = false) {
 async function refreshMatrixIfNeeded(matrix, force = false) {
   const nowMs = Date.now();
   const last = health.lastMatrixRefreshAt ? new Date(health.lastMatrixRefreshAt).getTime() : 0;
+  if (matrixRefreshing) return;
   if (!force && nowMs - last < config.matrix.refreshMinutes * 60 * 1000) return;
 
   if (!config.matrix.enabled) {
@@ -190,11 +199,14 @@ async function refreshMatrixIfNeeded(matrix, force = false) {
     return;
   }
 
+  matrixRefreshing = true;
   log(`[matrix] refreshing CLI list (every ${config.matrix.refreshMinutes} min)`);
   try {
     await matrix.ensureSession().catch(async () => { await matrix.login(); });
     const result = await matrix.harvest();
-    hotClis = Array.isArray(result.liveFeed) ? result.liveFeed : [];
+    matrixFreshClis = Array.isArray(result.fresh) ? result.fresh : [];
+    matrixHotClis = Array.isArray(result.hot) ? result.hot : [];
+    rebuildHotClis();
     const { added, total } = cliStore.merge([config.manualClis, result.all]);
     cliStore.setMeta({
       manual: config.manualClis,
@@ -202,13 +214,20 @@ async function refreshMatrixIfNeeded(matrix, force = false) {
       matrixAnnouncements: result.announcements?.length ?? 0,
       matrixFailed: result.failed?.length ?? 0,
       matrixMeta: result.meta ?? null,
+      matrixHot: matrixHotClis.length,
+      matrixFresh: matrixFreshClis.length,
       lastMatrixAdded: added,
       lastMatrixTotal: total,
     });
     health.lastMatrixRefreshAt = new Date().toISOString();
     health.matrixError = null;
     health.cliCount = total;
-    log(`[clis] Matrix harvest done — ${total} unique CLIs saved to ${config.cliFile} (added ${added})`);
+    health.matrixHotClis = matrixHotClis.length;
+    health.matrixFreshClis = matrixFreshClis.length;
+    log(
+      `[clis] Matrix harvest done — ${total} unique CLIs saved to ${config.cliFile} ` +
+        `(added ${added}, fresh ${matrixFreshClis.length}, hot ${matrixHotClis.length})`,
+    );
     if (total === 0) warn("[clis] WARNING: 0 CLIs found from Matrix. Check MATRIX_USERNAME/PASSWORD.");
   } catch (err) {
     health.matrixError = err.message;
@@ -216,6 +235,8 @@ async function refreshMatrixIfNeeded(matrix, force = false) {
     cliStore.merge([config.manualClis]);
     health.cliCount = cliStore.clis.length;
     health.lastMatrixRefreshAt = new Date().toISOString(); // avoid hammering on failure
+  } finally {
+    matrixRefreshing = false;
   }
 }
 
@@ -446,8 +467,9 @@ function startHealthServer() {
         pollSeconds: config.pollSeconds,
         priorityClis: config.priorityClis,
         telegramChatIds: chatIds,
-        hotClis: combinedHotClis().length,
-        matrixHotClis: hotClis.length,
+        hotClis: hotClis.length,
+        matrixHotClis: matrixHotClis.length,
+        matrixFreshClis: matrixFreshClis.length,
         signalHotClis: signalHotClis.length,
         rateLimitedForSeconds: Math.max(0, Math.ceil(((health.rateLimitedUntil ? new Date(health.rateLimitedUntil).getTime() : 0) - Date.now()) / 1000)),
         memory: process.memoryUsage(),
