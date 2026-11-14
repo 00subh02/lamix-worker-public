@@ -533,7 +533,11 @@ async function main() {
   } else if (chatIds.length) {
     log(`[telegram] chat ids: ${chatIds.join(", ")}`);
   }
-  startTelegramCommandPolling({ token: config.telegram.token, logger });
+  if (process.env.TELEGRAM_COMMANDS_ENABLED !== "false") {
+    startTelegramCommandPolling({ token: config.telegram.token, logger });
+  } else {
+    log("[telegram] command polling disabled (/myid helper not required)");
+  }
 
   const server = startHealthServer();
   startSelfPing();
