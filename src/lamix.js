@@ -177,6 +177,36 @@ export class LamixClient {
       .waitFor({ state: "visible", timeout: 30000 });
   }
 
+  async recreateSession() {
+    // Lamix frequently leaves its SPA on a blank page after a session expires.
+    // Rebuild only the browser/context/page and keep every rate-governor value.
+    await this.stop();
+    this.logger.warn("[lamix] CLI Search unavailable — rebuilding browser session and re-authenticating");
+    this.browser = await chromium.launch({
+      headless: this.headless,
+      args: [
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-background-timer-throttling",
+        "--disable-renderer-backgrounding",
+        "--disable-backgrounding-occluded-windows",
+      ],
+    });
+    this.context = await this.browser.newContext({
+      viewport: { width: 1280, height: 900 },
+      locale: "en-US",
+      timezoneId: "UTC",
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    });
+    this.page = await this.context.newPage();
+    this.page.setDefaultTimeout(10000);
+    await this.login();
+    await this.gotoCliSearch();
+    this.sessionStartedAt = Date.now();
+  }
+
   async recoverPage() {
     try {
       this.logger.warn("[lamix] recovering CLI Search page");
@@ -188,7 +218,12 @@ export class LamixClient {
         .waitFor({ state: "visible", timeout: 15000 });
     } catch (err) {
       this.logger.warn(`[lamix] recover failed: ${err.message}`);
-      throw err;
+      try {
+        await this.recreateSession();
+      } catch (reauthErr) {
+        this.logger.warn(`[lamix] re-authentication also failed: ${reauthErr.message}`);
+        throw reauthErr;
+      }
     }
   }
 

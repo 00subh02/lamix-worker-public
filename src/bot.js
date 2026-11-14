@@ -222,7 +222,7 @@ async function runCycle(client) {
   const allClis = cliStore.snapshot();
   if (allClis.length === 0) {
     warn("[clis] no CLIs to search yet — check Matrix login / LAMIX_CLIS");
-    return { sent: 0, cycles: [] };
+    return { sent: 0, cycles: [], attempts: 0, failures: 0 };
   }
 
   // Shard rotation for large pools — priority CLIs are always checked first,
@@ -309,6 +309,7 @@ async function runCycle(client) {
     if (Date.now() > cycleDeadline) throw new Error("Cycle deadline exceeded");
     const result = await client.searchCli(cli);
     const { rows, serverNowMs } = result;
+    const failed = Boolean(result?.failed);
     health.searchesDone += 1;
     health.paceMs = client.gapMs ?? health.paceMs;
     const alerts = [];
@@ -328,7 +329,7 @@ async function runCycle(client) {
     }
     alerts.sort((a, b) => b.lastSeenMs - a.lastSeenMs);
     log(`checked "${cli}": ${rows.length} row(s), ${alerts.length} new hit(s)` + (result.capped ? " (capped)" : ""));
-    return { cli, alerts, serverNowMs };
+    return { cli, alerts, serverNowMs, failed: Boolean(result?.failed) };
   }
 
   async function sendAlerts(cyclesToSend) {
@@ -417,7 +418,12 @@ async function runCycle(client) {
   await sendAlerts(restCycles);
 
   const totalSent = priorityCycles.reduce((s, c) => s + c.alerts.length, 0) + restCycles.reduce((s, c) => s + c.alerts.length, 0);
-  return { sent: totalSent, cycles };
+  return {
+    sent: totalSent,
+    cycles,
+    attempts: cycles.length,
+    failures: cycles.filter((c) => c.failed).length,
+  };
 }
 
 function startHealthServer() {
@@ -621,11 +627,29 @@ async function main() {
       // SignalPulse refresh is HTTP-only; run it in the background so a slow
       // download never delays Lamix searches (hot list updates atomically).
       if (signal) refreshSignalIfNeeded(signal, false).catch((e) => warn(`[signal] refresh failed: ${e.message}`));
-      await runCycle(lamix);
-      health.lastSuccessAt = new Date().toISOString();
-      health.lastError = null;
-      health.consecutiveFailures = 0;
-      fatalStreak = 0;
+      const cycleResult = await runCycle(lamix);
+      if (cycleResult.attempts > 0 && cycleResult.failures === cycleResult.attempts) {
+        health.lastError = "Lamix browser/session is not responding — every CLI failed in this cycle";
+        health.consecutiveFailures += 1;
+        fatalStreak += 1;
+        warn(`[lamix] ${fatalStreak} consecutive stalled cycle(s) — health endpoint will report degraded`);
+        if (fatalStreak >= 2) {
+          warn("[watchdog] rebuilding Lamix browser/session after stalled searches");
+          const rebuilt = await lamix.recreateSession().then(() => true).catch((e) => {
+            warn(`lamix session rebuild failed: ${e.message}`);
+            return false;
+          });
+          if (rebuilt) {
+            health.lamixRestarts += 1;
+            fatalStreak = 0;
+          }
+        }
+      } else {
+        health.lastSuccessAt = new Date().toISOString();
+        health.lastError = null;
+        health.consecutiveFailures = 0;
+        fatalStreak = 0;
+      }
       health.lastCycleMs = Date.now() - startedAt;
     } catch (err) {
       health.lastError = err.message;
