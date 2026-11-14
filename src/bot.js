@@ -6,6 +6,7 @@ import { SignalPulseClient } from "./signal.js";
 import { State } from "./state.js";
 import { CliStore } from "./clis.js";
 import { escapeHtml, sendTelegram, splitMessage, discoverChatId, verifyBot } from "./telegram.js";
+import { startTelegramCommandPolling } from "./commands.js";
 
 const config = loadConfig();
 const state = new State(config.stateFile);
@@ -510,6 +511,7 @@ async function main() {
   } else if (chatIds.length) {
     log(`[telegram] chat ids: ${chatIds.join(", ")}`);
   }
+  startTelegramCommandPolling({ token: config.telegram.token, logger });
 
   const server = startHealthServer();
   startSelfPing();
