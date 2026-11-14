@@ -287,7 +287,7 @@ async function runCycle(client) {
       return out;
     };
 
-    const useCold = hotPool.length === 0 || health.cycle % 6 === 0;
+    const useCold = hotPool.length === 0 || health.cycle % 30 === 29;
     let restBatch = [];
     let mode = "cold";
     if (!useCold) {
