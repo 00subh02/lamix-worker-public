@@ -620,9 +620,10 @@ async function main() {
   cliStore.merge([config.manualClis, config.priorityClis]);
   log(`[clis] pool loaded: ${cliStore.clis.length} CLI(s) (priority: ${config.priorityClis.join(", ") || "none"})`);
 
-  // Initial Matrix harvest (unless --scan-once requires it explicitly) — non-blocking
+  // Initial Matrix harvest blocks the first Lamix cycle so searches use live
+  // fresh/hot CLIs instead of the stale cold pool.
   if (matrix) {
-    refreshMatrixIfNeeded(matrix, true).catch((e) => warn(`[matrix] initial refresh failed: ${e.message}`));
+    await refreshMatrixIfNeeded(matrix, true).catch((e) => warn(`[matrix] initial refresh failed: ${e.message}`));
   } else cliStore.merge([config.manualClis]);
   if (signal) {
     refreshSignalIfNeeded(signal, true).catch((e) => warn(`[signal] initial refresh failed: ${e.message}`));
