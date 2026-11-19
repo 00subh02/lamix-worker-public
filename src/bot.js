@@ -404,15 +404,16 @@ async function runCycle(lamixAccounts) {
     warn(`[rate-limit] ${account?.username ?? "account"}: ${err.message} — pausing until ${health.rateLimitedUntil} (pace ${account?.gapMs ?? "?"}ms, cooldown ${account?.cooldownMs ?? "?"}ms)`);
   };
 
-  // 1) Priority fast-path (Lark every cycle)
+  // 1) Priority fast-path (Lark every cycle; if the primary account is cooling down, fail over to an available AK account)
+  const priorityClient = accounts.find((account) => account.rateLimitedForSeconds === 0) ?? client;
   const priorityCycles = [];
   for (const cli of priorityBatch) {
     try {
-      const cycle = await checkCli(cli, client);
+      const cycle = await checkCli(cli, priorityClient);
       priorityCycles.push(cycle);
     } catch (err) {
       if (err instanceof RateLimitError) {
-        markRateLimited(err, client);
+        markRateLimited(err, priorityClient);
       } else {
         warn(`CLI "${cli}" failed: ${err.message}`);
       }
