@@ -25,7 +25,21 @@ The panel returns data for the **last 24 hours**; the bot filters it down to the
 
 ---
 
-## 1. Telegram setup
+## Multi-account Lamix hunting
+
+The bot can use more than one Lamix account in parallel. Add comma-separated accounts to `LAMIX_ACCOUNTS` as `username:password`; the primary account `LAMIX_USERNAME`/`LAMIX_PASSWORD` is always included.
+
+Example (do not use these real-looking placeholders):
+
+```env
+LAMIX_ACCOUNTS=user_a:password_a,user_b:password_b
+CLIS_PER_CYCLE=12
+SEARCH_PACING_MS=2000
+```
+
+Each account has its own browser session and rate limiter. Priority CLIs (`Lark`) are checked by the primary account, while the rest of `fresh/hot/cold` CLIs are assigned round-robin across every account. A cool-down on one session does not pause the others.
+
+
 
 1. Open Telegram, talk to **@BotFather**, send `/newbot`, follow the steps.
 2. Copy the **bot token** (`123456789:AA...`). This is `TELEGRAM_BOT_TOKEN`.
@@ -121,6 +135,7 @@ The bot needs:
 | `LAMIX_USERNAME` | – | Panel username |
 | `LAMIX_PASSWORD` | – | Panel password |
 | `LAMIX_CLIS` | – | Comma separated high-priority CLIs, e.g. `Lark` |
+| `LAMIX_ACCOUNTS` | – | Extra accounts as `user:pass,user2:pass2`; primary always included |
 | `PRIORITY_CLIS` | `Lark` | CLIs searched first every cycle |
 | `TELEGRAM_BOT_TOKEN` | – | BotFather token |
 | `TELEGRAM_CHAT_ID` | – | Group/channel id(s) (e.g. `-100...,-100...`) |

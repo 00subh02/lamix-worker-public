@@ -24,6 +24,20 @@ function parseClis(raw) {
   return raw.split(",").map((s) => s.trim()).filter(Boolean);
 }
 
+function parseAccounts(raw) {
+  if (!raw) return [];
+  const out = [];
+  for (const part of raw.split(",")) {
+    const pair = part.trim();
+    const idx = pair.indexOf(":");
+    if (idx <= 0 || idx === pair.length - 1) continue;
+    const username = pair.slice(0, idx).trim();
+    const password = pair.slice(idx + 1).trim();
+    if (username && password) out.push({ username, password });
+  }
+  return out;
+}
+
 export function loadConfig() {
   const manualClis = parseClis(process.env.LAMIX_CLIS || process.env.LAMIX_CLI || "");
 
@@ -53,6 +67,7 @@ export function loadConfig() {
   const clisPerCycle = int("CLIS_PER_CYCLE", 12, { min: 0 }); // 0 = all each cycle
   const matrixRefreshMinutes = int("MATRIX_REFRESH_MINUTES", 60, { min: 1, max: 1440 });
   const priorityClis = parseClis(process.env.PRIORITY_CLIS || "Lark");
+  const extraLamixAccounts = parseAccounts(process.env.LAMIX_ACCOUNTS || "");
   const searchWindowHours = int("SEARCH_WINDOW_HOURS", 24, { min: 1, max: 168 });
 
   // Lamix pacing / rate-limit guard
@@ -76,6 +91,7 @@ export function loadConfig() {
 
   return {
     lamix: { baseUrl: lamixUrl, username: lamixUsername, password: lamixPassword },
+    extraLamixAccounts,
     matrix: {
       enabled: matrixEnabled,
       baseUrl: matrixUrl,

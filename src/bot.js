@@ -240,8 +240,14 @@ async function refreshMatrixIfNeeded(matrix, force = false) {
   }
 }
 
-async function runCycle(client) {
+async function runCycle(lamixAccounts) {
+  const accounts = Array.isArray(lamixAccounts) ? lamixAccounts.filter(Boolean) : [lamixAccounts];
+  const client = accounts[0];
   const allClis = cliStore.snapshot();
+  if (accounts.length === 0) {
+    warn("[lamix] no client sessions available — check LAMIX_USERNAME/PASSWORD or LAMIX_ACCOUNTS");
+    return { sent: 0, cycles: [], attempts: 0, failures: 0 };
+  }
   if (allClis.length === 0) {
     warn("[clis] no CLIs to search yet — check Matrix login / LAMIX_CLIS");
     return { sent: 0, cycles: [], attempts: 0, failures: 0 };
@@ -327,13 +333,13 @@ async function runCycle(client) {
 
   // Cycle timeout guard: never let one batch block past the deadline
   const cycleDeadline = Date.now() + config.cycleSeconds * 1000;
-  async function checkCli(cli) {
+  async function checkCli(cli, account) {
     if (Date.now() > cycleDeadline) throw new Error("Cycle deadline exceeded");
-    const result = await client.searchCli(cli);
+    const result = await account.searchCli(cli);
     const { rows, serverNowMs } = result;
     const failed = Boolean(result?.failed);
     health.searchesDone += 1;
-    health.paceMs = client.gapMs ?? health.paceMs;
+    health.paceMs = account.gapMs ?? health.paceMs;
     const alerts = [];
     const cooldownMs = config.rangeCooldownMinutes * 60 * 1000;
     for (const row of rows) {
@@ -350,7 +356,7 @@ async function runCycle(client) {
       alerts.push({ range, lastSeenMs, ageMs, exactKey, rangeKey });
     }
     alerts.sort((a, b) => b.lastSeenMs - a.lastSeenMs);
-    log(`checked "${cli}": ${rows.length} row(s), ${alerts.length} new hit(s)` + (result.capped ? " (capped)" : ""));
+    log(`checked "${cli}" (${account.username ?? "account"}): ${rows.length} row(s), ${alerts.length} new hit(s)` + (result.capped ? " (capped)" : ""));
     return { cli, alerts, serverNowMs, failed: Boolean(result?.failed) };
   }
 
@@ -389,50 +395,58 @@ async function runCycle(client) {
   const priorityBatch = batch.filter((c) => prioritySet.has(String(c).toLowerCase()));
   const restBatch = batch.filter((c) => !prioritySet.has(String(c).toLowerCase()));
 
-  const markRateLimited = (err) => {
-    health.rateLimitHits = client.rateLimitHits ?? health.rateLimitHits;
-    health.last429At = client.last429At ?? new Date().toISOString();
+  const markRateLimited = (err, account) => {
+    health.rateLimitHits += 1;
+    health.last429At = (account?.last429At ?? new Date().toISOString());
     health.rateLimitedUntil = new Date(Date.now() + (err.retryAfterSeconds ?? 300) * 1000).toISOString();
-    health.paceMs = client.gapMs ?? health.paceMs;
-    health.cooldownMs = client.cooldownMs ?? health.cooldownMs;
-    warn(`[rate-limit] ${err.message} — pausing searches until ${health.rateLimitedUntil} (pace ${client.gapMs}ms, cooldown ${client.cooldownMs}ms)`);
+    health.paceMs = account?.gapMs ?? health.paceMs;
+    health.cooldownMs = account?.cooldownMs ?? health.cooldownMs;
+    warn(`[rate-limit] ${account?.username ?? "account"}: ${err.message} — pausing until ${health.rateLimitedUntil} (pace ${account?.gapMs ?? "?"}ms, cooldown ${account?.cooldownMs ?? "?"}ms)`);
   };
 
   // 1) Priority fast-path (Lark every cycle)
   const priorityCycles = [];
-  let limited = false;
   for (const cli of priorityBatch) {
     try {
-      const cycle = await checkCli(cli);
+      const cycle = await checkCli(cli, client);
       priorityCycles.push(cycle);
     } catch (err) {
-      if (err instanceof AuthError) throw err;
       if (err instanceof RateLimitError) {
-        markRateLimited(err);
-        limited = true;
-        break;
+        markRateLimited(err, client);
+      } else {
+        warn(`CLI "${cli}" failed: ${err.message}`);
       }
-      warn(`CLI "${cli}" failed: ${err.message}`);
     }
   }
   await sendAlerts(priorityCycles);
 
-  // 2) Rotate the rest — stop immediately when Lamix asks us to back off
+  // 2) Rotate the rest in parallel across every independent Lamix session.
+  // Each account has its own rate limiter, so a cool-down on one session does not stop the others.
   const cycles = [...priorityCycles];
-  for (const cli of restBatch) {
-    if (limited) break;
-    try {
-      const cycle = await checkCli(cli);
-      cycles.push(cycle);
-    } catch (err) {
-      if (err instanceof AuthError) throw err;
-      if (err instanceof RateLimitError) {
-        markRateLimited(err);
-        limited = true;
-        break;
+  const assignments = restBatch.map((cli, index) => ({
+    cli,
+    account: accounts[index % accounts.length],
+  }));
+  const settled = await Promise.all(
+    assignments.map(async ({ cli, account }) => {
+      try {
+        return await checkCli(cli, account);
+      } catch (err) {
+        return { __error: true, cli, account, err };
       }
-      warn(`CLI "${cli}" failed: ${err.message}`);
+    }),
+  );
+  for (const result of settled) {
+    if (result?.__error) {
+      const { cli, account, err } = result;
+      if (err instanceof RateLimitError) {
+        markRateLimited(err, account);
+      } else {
+        warn(`CLI "${cli}" (${account?.username ?? "account"}) failed: ${err?.message || String(err)}`);
+      }
+      continue;
     }
+    cycles.push(result);
   }
 
   // Send the rest (priority already sent above, so only send non-priority hits now)
@@ -562,6 +576,24 @@ async function main() {
     priorityTimeoutMs: config.priorityTimeoutMs,
   });
 
+  const lamixAccounts = [lamix];
+  for (const account of config.extraLamixAccounts ?? []) {
+    if (!account.username || !account.password) continue;
+    lamixAccounts.push(
+      new LamixClient({
+        baseUrl: config.lamix.baseUrl,
+        username: account.username,
+        password: account.password,
+        headless: config.headless,
+        logger,
+        priorityClis: config.priorityClis,
+        searchPacingMs: config.searchPacingMs,
+        searchTimeoutMs: config.searchTimeoutMs,
+        priorityTimeoutMs: config.priorityTimeoutMs,
+      }),
+    );
+  }
+
   let matrix = null;
   if (config.matrix.enabled && config.matrix.username && config.matrix.password) {
     matrix = new MatrixClient({
@@ -576,31 +608,33 @@ async function main() {
     warn("[matrix] MATRIX_USERNAME/PASSWORD not set — using manual CLIs only. Add them to get auto-harvest.");
   }
 
-  // Non-fatal start: if lamix fails, infinite retry (never die, never off)
-  let lamixStarted = false;
-  for (let attempt = 1; attempt <= 5 && !lamixStarted; attempt++) {
-    try {
-      await lamix.start();
-      lamixStarted = true;
-    } catch (err) {
-      console.error(`[fatal] Lamix start failed attempt ${attempt}/5: ${err.message} — retrying in 10s`);
-      await sleep(10000);
+  // Start every Lamix session independently; one failed account must not block the others.
+  const startResults = await Promise.allSettled(lamixAccounts.map((account) => account.start()));
+  const workingLamixAccounts = lamixAccounts.filter((_, index) => startResults[index]?.status === "fulfilled");
+  startResults.forEach((result, index) => {
+    const rel = lamixAccounts[index];
+    if (result.status === "fulfilled") {
+      log(`[lamix] account "${rel.username}" ready`);
+    } else {
+      warn(`[lamix] account "${rel.username}" failed to start: ${result.reason?.message || String(result.reason)}`);
     }
-  }
-  if (!lamixStarted) {
-    console.error("[fatal] Lamix failed after 5 attempts, starting health-only mode (alerts paused, ping continues)");
+  });
+
+  if (workingLamixAccounts.length === 0) {
+    console.error("[fatal] Lamix failed after all attempts, starting health-only mode (alerts paused, ping continues)");
   }
 
   // Watchdog + auto-recovery: never stay dead.
   let running = true;
   let restartRequested = false;
   let fatalStreak = 0;
+  const restartAllLamix = () => Promise.allSettled(lamixAccounts.map((account) => account.restart()));
   const shutdown = async (signal) => {
     if (!running) return;
     running = false;
     log(`received ${signal}, shutting down`);
     server?.close();
-    await lamix.stop().catch(() => {});
+    await Promise.allSettled(lamixAccounts.map((account) => account.stop()));
     await matrix?.stop().catch(() => {});
     // Graceful: don't exit immediately, let Render kill if needed
     setTimeout(() => process.exit(0), 5000).unref?.();
@@ -636,11 +670,13 @@ async function main() {
   if (config.scanOnce) {
     log(`[scan-once] CLIs saved: ${cliStore.clis.length} -> ${config.cliFile}`);
     console.log(JSON.stringify(cliStore.snapshot(), null, 2));
-    await lamix.stop().catch(() => {});
+    await Promise.allSettled(lamixAccounts.map((account) => account.stop()));
     await matrix?.stop().catch(() => {});
     server?.close();
     return;
   }
+
+  const activeLamixAccounts = () => (workingLamixAccounts.length ? workingLamixAccounts : lamixAccounts);
 
   while (running) {
     const startedAt = Date.now();
@@ -648,7 +684,7 @@ async function main() {
     health.lastCycleAt = new Date().toISOString();
     try {
       if (restartRequested) {
-        await lamix.restart();
+        await restartAllLamix();
         health.lamixRestarts += 1;
         restartRequested = false;
       }
@@ -656,7 +692,7 @@ async function main() {
       // SignalPulse refresh is HTTP-only; run it in the background so a slow
       // download never delays Lamix searches (hot list updates atomically).
       if (signal) refreshSignalIfNeeded(signal, false).catch((e) => warn(`[signal] refresh failed: ${e.message}`));
-      const cycleResult = await runCycle(lamix);
+      const cycleResult = await runCycle(activeLamixAccounts());
       if (cycleResult.attempts > 0 && cycleResult.failures === cycleResult.attempts) {
         health.lastError = "Lamix browser/session is not responding — every CLI failed in this cycle";
         health.consecutiveFailures += 1;
@@ -664,11 +700,8 @@ async function main() {
         warn(`[lamix] ${fatalStreak} consecutive stalled cycle(s) — health endpoint will report degraded`);
         if (fatalStreak >= 2) {
           warn("[watchdog] rebuilding Lamix browser/session after stalled searches");
-          const rebuilt = await lamix.recreateSession().then(() => true).catch((e) => {
-            warn(`lamix session rebuild failed: ${e.message}`);
-            return false;
-          });
-          if (rebuilt) {
+          const rebuilt = await Promise.allSettled(workingLamixAccounts.map((account) => account.recreateSession()));
+          if (rebuilt.some((result) => result.status === "fulfilled")) {
             health.lamixRestarts += 1;
             fatalStreak = 0;
           }
@@ -693,7 +726,7 @@ async function main() {
       if (fatalStreak >= 3) {
         warn(`[watchdog] ${fatalStreak} consecutive failures — full restart in 10s`);
         await sleep(10000);
-        await lamix.restart().catch((e) => warn(`lamix restart failed: ${e.message}`));
+        await restartAllLamix().catch((e) => warn(`lamix restart failed: ${e.message}`));
         health.lamixRestarts += 1;
         restartRequested = false;
       }
@@ -701,12 +734,11 @@ async function main() {
     if (state.prune(Date.now()) > 0) state.save();
     if (config.once) break;
     const elapsed = Date.now() - startedAt;
-    // Smooth pacing between cycles + honor Lamix 429 cool-down (never hammer a lockout)
-    const rateLimitWaitMs = lamix.rateLimitedForSeconds * 1000;
-    const waitMs = Math.max(5000, config.pollSeconds * 1000 - elapsed, rateLimitWaitMs);
+    // Smooth pacing between cycles + honor 429 cool-down per account. Do not pause healthy sessions.
+    const waitMs = Math.max(5000, config.pollSeconds * 1000 - elapsed);
     await sleep(Math.min(waitMs, 10 * 60 * 1000));
   }
-  await lamix.stop().catch(() => {});
+  await Promise.allSettled(lamixAccounts.map((account) => account.stop()));
   await matrix?.stop().catch(() => {});
   server?.close();
   log("stopped");
