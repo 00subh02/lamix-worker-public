@@ -404,8 +404,10 @@ async function runCycle(lamixAccounts) {
     warn(`[rate-limit] ${account?.username ?? "account"}: ${err.message} — pausing until ${health.rateLimitedUntil} (pace ${account?.gapMs ?? "?"}ms, cooldown ${account?.cooldownMs ?? "?"}ms)`);
   };
 
-  // 1) Priority fast-path (Lark every cycle; if the primary account is cooling down, fail over to an available AK account)
-  const priorityClient = accounts.find((account) => account.rateLimitedForSeconds === 0) ?? client;
+  const liveAccounts = accounts.filter((account) => account.rateLimitedForSeconds === 0);
+  const activeAccounts = liveAccounts.length ? liveAccounts : accounts;
+  // Rotate Lark across every currently healthy session instead of permanently using one.
+  const priorityClient = liveAccounts.length ? liveAccounts[(health.cycle - 1) % liveAccounts.length] : accounts[0];
   const priorityCycles = [];
   for (const cli of priorityBatch) {
     try {
@@ -426,7 +428,7 @@ async function runCycle(lamixAccounts) {
   const cycles = [...priorityCycles];
   const assignments = restBatch.map((cli, index) => ({
     cli,
-    account: accounts[index % accounts.length],
+    account: activeAccounts[index % activeAccounts.length],
   }));
   const settled = await Promise.all(
     assignments.map(async ({ cli, account }) => {
