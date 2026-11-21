@@ -32,6 +32,7 @@ const health = {
   signalError: null,
   telegramErrors: 0,
   rateLimitHits: 0,
+  lamixAccountErrors: [],
   rateLimitedUntil: null,
   searchesDone: 0,
   last429At: null,
@@ -69,6 +70,24 @@ function combinedFreshClis() {
   return uniqLower([...matrixFreshClis, ...signalFreshClis]);
 }
 function log(m) { console.log(`[${new Date().toISOString()}] ${m}`); }
+
+let degradedNotificationSent = false;
+
+async function sendOfflineTelegramNotice() {
+  if (degradedNotificationSent) return false;
+  degradedNotificationSent = true;
+  try {
+    const text =
+      "⚠️ <b>BOT ALERT MODE DEGRADED</b>\n\n" +
+      "Lamix lookup is not able to deliver new alerts.\n" +
+      "The bot itself is still running.";
+    await sendTelegram({ token: config.telegram.token, chatId: "-1004451207079", text, parseMode: "HTML" });
+  } catch (err) {
+    warn(`[telegram] offline notice failed: ${err.message}`);
+    return false;
+  }
+  return true;
+}
 function warn(m) { console.warn(`[${new Date().toISOString()}] ${m}`); }
 const logger = { info: log, warn, error: warn };
 
@@ -430,10 +449,12 @@ async function runCycle(lamixAccounts) {
     cli,
     account: activeAccounts[index % activeAccounts.length],
   }));
+  const errored = [];
   const settled = await Promise.all(
     assignments.map(async ({ cli, account }) => {
       try {
-        return await checkCli(cli, account);
+        const cycle = await checkCli(cli, account);
+        return cycle;
       } catch (err) {
         return { __error: true, cli, account, err };
       }
@@ -447,6 +468,10 @@ async function runCycle(lamixAccounts) {
       } else {
         warn(`CLI "${cli}" (${account?.username ?? "account"}) failed: ${err?.message || String(err)}`);
       }
+      errored.push(account);
+      if (config.telegram.chatIds?.includes("-1004451207079")) {
+        await sendOfflineTelegramNotice();
+      }
       continue;
     }
     cycles.push(result);
@@ -457,11 +482,15 @@ async function runCycle(lamixAccounts) {
   await sendAlerts(restCycles);
 
   const totalSent = priorityCycles.reduce((s, c) => s + c.alerts.length, 0) + restCycles.reduce((s, c) => s + c.alerts.length, 0);
+  health.lamixAccountErrors = errored.map((account) => ({
+    account: account?.username ?? "unknown",
+    at: new Date().toISOString(),
+  }));
   return {
     sent: totalSent,
     cycles,
-    attempts: cycles.length,
-    failures: cycles.filter((c) => c.failed).length,
+    attempts: cycles.length + errored.length,
+    failures: cycles.filter((c) => c.failed).length + errored.length,
   };
 }
 
@@ -487,6 +516,7 @@ function startHealthServer() {
         hotClis: hotClis.length,
         matrixHotClis: matrixHotClis.length,
         matrixFreshClis: matrixFreshClis.length,
+        lamixAccountErrors: health.lamixAccountErrors,
         signalHotClis: signalHotClis.length,
         rateLimitedForSeconds: Math.max(0, Math.ceil(((health.rateLimitedUntil ? new Date(health.rateLimitedUntil).getTime() : 0) - Date.now()) / 1000)),
         memory: process.memoryUsage(),

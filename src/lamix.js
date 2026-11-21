@@ -180,31 +180,42 @@ export class LamixClient {
   async recreateSession() {
     // Lamix frequently leaves its SPA on a blank page after a session expires.
     // Rebuild only the browser/context/page and keep every rate-governor value.
-    await this.stop();
-    this.logger.warn("[lamix] CLI Search unavailable — rebuilding browser session and re-authenticating");
-    this.browser = await chromium.launch({
-      headless: this.headless,
-      args: [
-        "--no-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-blink-features=AutomationControlled",
-        "--disable-background-timer-throttling",
-        "--disable-renderer-backgrounding",
-        "--disable-backgrounding-occluded-windows",
-      ],
-    });
-    this.context = await this.browser.newContext({
-      viewport: { width: 1280, height: 900 },
-      locale: "en-US",
-      timezoneId: "UTC",
-      userAgent:
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    });
-    this.page = await this.context.newPage();
-    this.page.setDefaultTimeout(10000);
-    await this.login();
-    await this.gotoCliSearch();
-    this.sessionStartedAt = Date.now();
+    // Retry twice because panel API can be slow or interrupted during login
+    // (matches the 15s-vs-45s failure pattern seen in production).
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await this.stop();
+        this.logger.warn(`[lamix] CLI Search unavailable — rebuilding browser session (attempt ${attempt})`);
+        this.browser = await chromium.launch({
+          headless: this.headless,
+          args: [
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-blink-features=AutomationControlled",
+            "--disable-background-timer-throttling",
+            "--disable-renderer-backgrounding",
+            "--disable-backgrounding-occluded-windows",
+          ],
+        });
+        this.context = await this.browser.newContext({
+          viewport: { width: 1280, height: 900 },
+          locale: "en-US",
+          timezoneId: "UTC",
+          userAgent:
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        });
+        this.page = await this.context.newPage();
+        this.page.setDefaultTimeout(10000);
+        await this.login();
+        await this.gotoCliSearch();
+        this.sessionStartedAt = Date.now();
+        return;
+      } catch (err) {
+        this.logger.warn(`[lamix] session rebuild attempt ${attempt} failed: ${err.message}`);
+        if (attempt < 3) await sleep(15000);
+      }
+    }
+    throw new AuthError("Lamix session rebuild failed after 3 attempts");
   }
 
   async recoverPage() {
