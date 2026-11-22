@@ -402,16 +402,33 @@ async function runCycle(lamixAccounts) {
   const priorityBatch = batch.filter((c) => prioritySet.has(String(c).toLowerCase()));
   const restBatch = batch.filter((c) => !prioritySet.has(String(c).toLowerCase()));
 
+  const lastRateLog = new Map();
   const markRateLimited = (err, account) => {
     health.rateLimitHits += 1;
-    health.last429At = (account?.last429At ?? new Date().toISOString());
-    health.rateLimitedUntil = new Date(Date.now() + (err.retryAfterSeconds ?? 300) * 1000).toISOString();
+    health.last429At = account?.last429At ?? new Date().toISOString();
+    health.rateLimitedUntil = new Date(Date.now() + (err.retryAfterSeconds ?? 45) * 1000).toISOString();
     health.paceMs = account?.gapMs ?? health.paceMs;
     health.cooldownMs = account?.cooldownMs ?? health.cooldownMs;
-    warn(`[rate-limit] ${account?.username ?? "account"}: ${err.message} — pausing until ${health.rateLimitedUntil} (pace ${account?.gapMs ?? "?"}ms, cooldown ${account?.cooldownMs ?? "?"}ms)`);
+    // One line per account per cooldown, not one per queued CLI.
+    const key = account?.username ?? "account";
+    const now = Date.now();
+    if (now - (lastRateLog.get(key) ?? 0) > 30000) {
+      lastRateLog.set(key, now);
+      warn(`[rate-limit] ${key}: ${err.message} — pausing until ${health.rateLimitedUntil} (pace ${account?.gapMs ?? "?"}ms)`);
+    }
   };
 
-  const liveAccounts = accounts.filter((account) => account.rateLimitedForSeconds === 0);
+  let liveAccounts = accounts.filter((account) => account.rateLimitedForSeconds === 0);
+  if (liveAccounts.length === 0 && accounts.length > 0) {
+    // All sessions are cooling down. Wait for the earliest one instead of
+    // burning the whole batch as instant failures (which killed the cycle).
+    const waitMs = Math.max(0, Math.min(...accounts.map((a) => a.blockedUntil)) - Date.now());
+    if (waitMs > 0 && waitMs < 90000) {
+      log(`[rate-limit] all accounts cooling down ${Math.ceil(waitMs / 1000)}s — waiting before continuing`);
+      await sleep(waitMs + 200);
+      liveAccounts = accounts.filter((account) => account.rateLimitedForSeconds === 0);
+    }
+  }
   const activeAccounts = liveAccounts.length ? liveAccounts : accounts;
   // Rotate Lark across every currently healthy session instead of permanently using one.
   const priorityClient = liveAccounts.length ? liveAccounts[(health.cycle - 1) % liveAccounts.length] : accounts[0];
@@ -461,7 +478,7 @@ async function runCycle(lamixAccounts) {
           try {
             out.push(await checkCli(cli, account));
           } catch (err) {
-            out.push({ __error: true, cli, account, err });
+            out.push({ __error: true, __rateLimited: err instanceof RateLimitError, cli, account, err });
           }
         }
         return out;
@@ -475,10 +492,12 @@ async function runCycle(lamixAccounts) {
       const { cli, account, err } = result;
       if (err instanceof RateLimitError) {
         markRateLimited(err, account);
+        // A cooldown is not a broken session — don't count it as a failed CLI
+        // or the watchdog rebuilds healthy sessions and the loop never ends.
       } else {
         warn(`CLI "${cli}" (${account?.username ?? "account"}) failed: ${err?.message || String(err)}`);
+        errored.push(account);
       }
-      errored.push(account);
       continue;
     }
     cycles.push(result);

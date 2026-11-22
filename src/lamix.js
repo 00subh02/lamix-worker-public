@@ -284,11 +284,13 @@ export class LamixClient {
     this.rateLimitHits += 1;
     this.last429At = new Date().toISOString();
     this.last429RetrySeconds = retryAfter;
-    const waitMs = Math.min(this.maxCooldownMs, Math.max(this.cooldownMs, 30000));
+    // Respect the panel's own retry-after instead of compounding the cooldown
+    // on every queued CLI (that used to push it to 5 minutes and kill cycles).
+    const retryMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 30000;
+    const waitMs = Math.min(this.maxCooldownMs, Math.max(retryMs, 15000));
     this.blockedUntil = Date.now() + waitMs;
     this.nextSearchAt = this.blockedUntil;
-    this.cooldownMs = Math.min(this.maxCooldownMs, Math.round(this.cooldownMs * 1.8));
-    this.gapMs = Math.min(this.maxGapMs, Math.max(8000, Math.round(this.gapMs * 1.6)));
+    this.cooldownMs = Math.min(this.maxCooldownMs, waitMs);
     this.successStreak = 0;
     this.lastCooldownMs = waitMs;
   }
