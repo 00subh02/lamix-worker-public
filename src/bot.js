@@ -307,8 +307,11 @@ async function runCycle(lamixAccounts) {
     const totalRest = pool.length;
     const offset = totalRest ? health.cliOffset % totalRest : 0;
     const batchRest = pool.slice(offset, offset + azSlots);
-    if (batchRest.length < azSlots && totalRest > 0) {
-      batchRest.push(...pool.slice(0, azSlots - batchRest.length));
+    // Wrap only to the CLIs skipped before `offset`. Padding with the whole
+    // pool duplicated CLIs already in batchRest (log showed e.g. 219/216).
+    const remaining = azSlots - batchRest.length;
+    if (remaining > 0 && offset > 0) {
+      batchRest.push(...pool.slice(0, Math.min(remaining, offset)));
     }
     health.cliOffset = totalRest ? (offset + azSlots) % totalRest : 0;
     batch = [...priorityInList, ...early, ...batchRest];
@@ -632,7 +635,13 @@ async function main() {
   }
 
   // Start every Lamix session independently; one failed account must not block the others.
-  const startResults = await Promise.allSettled(lamixAccounts.map((account) => account.start()));
+  // Stagger logins: six simultaneous page loads made the panel serve a slow
+  // challenge page and every account timed out. Start one account at a time.
+  const startResults = [];
+  for (let i = 0; i < lamixAccounts.length; i += 1) {
+    startResults.push(await Promise.allSettled([lamixAccounts[i].start()]).then((r) => r[0]));
+    if (i < lamixAccounts.length - 1) await sleep(1500);
+  }
   let workingLamixAccounts = lamixAccounts.filter((_, index) => startResults[index]?.status === "fulfilled");
   startResults.forEach((result, index) => {
     const rel = lamixAccounts[index];
@@ -701,7 +710,7 @@ async function main() {
     return;
   }
 
-  const activeLamixAccounts = () => (workingLamixAccounts.length ? workingLamixAccounts : lamixAccounts);
+  const activeLamixAccounts = () => workingLamixAccounts;
 
   // Retry any account that failed its initial login. Without this, one slow
   // page load permanently removes that account from the search pool.
@@ -735,7 +744,18 @@ async function main() {
         health.lamixRestarts += 1;
         restartRequested = false;
       }
-      void retryFailedAccounts();
+      // Watchdog: never run a cycle with zero ready accounts — that used to
+      // trigger a rebuild storm (every CLI fails -> rebuild -> fail again).
+      if (workingLamixAccounts.length === 0) {
+        warn("[watchdog] no ready Lamix accounts — retrying logins, searches paused");
+        await retryFailedAccounts();
+        if (workingLamixAccounts.length === 0) {
+          await sleep(15000);
+          continue;
+        }
+      } else {
+        void retryFailedAccounts();
+      }
       if (matrix) await refreshMatrixIfNeeded(matrix, false);
       // SignalPulse refresh is HTTP-only; run it in the background so a slow
       // download never delays Lamix searches (hot list updates atomically).

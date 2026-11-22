@@ -126,9 +126,17 @@ export class LamixClient {
     this.page = await this.context.newPage();
     // Fail fast — every step that matters has its own explicit timeout.
     this.page.setDefaultTimeout(10000);
-    await this.login();
-    await this.gotoCliSearch();
-    this.sessionStartedAt = Date.now();
+    try {
+      await this.login();
+      await this.gotoCliSearch();
+      this.sessionStartedAt = Date.now();
+    } catch (err) {
+      // A failed login used to leave its context/page open. Repeated retries
+      // then piled up hundreds of pages in the shared browser and every
+      // account timed out. Always release the context before rethrowing.
+      await this.stop();
+      throw err;
+    }
   }
 
   async stop() {
