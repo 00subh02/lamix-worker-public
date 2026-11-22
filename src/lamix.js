@@ -39,7 +39,9 @@ export async function getSharedBrowser(headless) {
           "--disable-gpu",
           "--disable-software-rasterizer",
           "--disable-extensions",
-          "--disable-features=TranslateUI,BackForwardCache",
+          "--disable-features=site-per-process,TranslateUI,BackForwardCache",
+          "--renderer-process-limit=1",
+          "--disable-ipc-flooding-protection",
         ],
       })
       .then((browser) => {
@@ -55,7 +57,7 @@ export async function getSharedBrowser(headless) {
 
 export async function createLowMemoryContext(browser) {
   const context = await browser.newContext({
-    viewport: { width: 640, height: 480 },
+    viewport: { width: 480, height: 360 },
     deviceScaleFactor: 1,
     locale: "en-US",
     timezoneId: "UTC",
