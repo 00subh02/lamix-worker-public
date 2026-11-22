@@ -79,8 +79,8 @@ export function loadConfig() {
   // Premium custom emoji IDs used in alert headers. Defaults match the
   // reference alert (🆕 + 🎤🎤🎤). Override via env if a different pack is wanted.
   const alertEmoji = {
-    new: optional("ALERT_EMOJI_NEW", "5382357040008021292"),
-    mic: optional("ALERT_EMOJI_MIC", "5778673721317267508"),
+    NEW: optional("ALERT_EMOJI_NEW", "5382357040008021292"),
+    MIC: optional("ALERT_EMOJI_MIC", "5778673721317267508"),
   };
 
   const cliFile = optional("CLI_FILE", "./data/clis.json");

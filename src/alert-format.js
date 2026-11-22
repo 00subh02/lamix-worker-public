@@ -51,7 +51,8 @@ function formatIstStamp(ms) {
  *   Time: 14s ago · 1:31 AM
  *   ...
  */
-export function buildAlertMessage({ cycles, nowMs, windowMinutes, emoji = PREMIUM_EMOJI }) {
+export function buildAlertMessage({ cycles, nowMs, windowMinutes, emoji }) {
+  const ids = { ...PREMIUM_EMOJI, ...(emoji ?? {}) };
   const total = cycles.reduce((sum, c) => sum + (c.alerts?.length ?? 0), 0);
   const rangeWord = total === 1 ? "RANGE" : "RANGES";
 
@@ -70,12 +71,12 @@ export function buildAlertMessage({ cycles, nowMs, windowMinutes, emoji = PREMIU
   };
 
   // Header with Premium emoji (custom_emoji entities must carry raw emoji glyphs).
-  add("custom_emoji", "🆕", { custom_emoji_id: emoji.NEW });
+  add("custom_emoji", "🆕", { custom_emoji_id: ids.NEW });
   push(" ");
   add("bold", "LAMIX CLI ALERT");
-  add("custom_emoji", "🎤", { custom_emoji_id: emoji.MIC });
-  add("custom_emoji", "🎤", { custom_emoji_id: emoji.MIC });
-  add("custom_emoji", "🎤", { custom_emoji_id: emoji.MIC });
+  add("custom_emoji", "🎤", { custom_emoji_id: ids.MIC });
+  add("custom_emoji", "🎤", { custom_emoji_id: ids.MIC });
+  add("custom_emoji", "🎤", { custom_emoji_id: ids.MIC });
   push("\n");
   push(`${formatIstStamp(nowMs)} · 0-${windowMinutes} MIN · ${total} ${rangeWord}\n`);
   push("\n");
