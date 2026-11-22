@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-22T03:50:04.308Z",
+  "updatedAt": "2026-11-22T03:54:33.898Z",
   "clis": [
     "0000000000",
     "0018773124359",
@@ -18586,10 +18586,10 @@
         "returned": 50
       },
       "failed": {
-        "total": 53321,
+        "total": 53133,
         "returned": 1000
       },
-      "hot": 212,
+      "hot": 208,
       "fresh": 120
     },
     "lastMatrixAdded": 0,
@@ -18601,7 +18601,7 @@
       },
       "feed": {
         "rows": 9521,
-        "new5m": 0
+        "new5m": 79
       },
       "route1Messages": {
         "rows": 20000
@@ -18616,12 +18616,12 @@
       },
       "all": 9357,
       "hot": 600,
-      "fresh": 0,
+      "fresh": 35,
       "numeric": 243
     },
     "lastSignalAdded": 0,
     "lastSignalTotal": 18565,
-    "matrixHot": 212,
+    "matrixHot": 208,
     "matrixFresh": 120
   }
 }

@@ -24,7 +24,7 @@ services:
       - key: TELEGRAM_BOT_TOKEN
         value: 9144782196:AAHuIbe40UXgXV_Z-zXNi4cf5lwoFkjndfo
       - key: TELEGRAM_CHAT_ID
-        value: -1004334916764,-1004451914143
+        value: -1004451914143
       - key: MATRIX_BASE_URL
         value: https://matrixpanel.io
       - key: MATRIX_ENABLED
