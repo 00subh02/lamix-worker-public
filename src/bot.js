@@ -46,6 +46,21 @@ let signalRefreshing = false;
 let matrixHotClis = [];
 let matrixFreshClis = [];
 let matrixRefreshing = false;
+// CLIs that actually returned rows recently. The panel only allows ~96
+// searches per cooldown window, so check the productive ones first after each
+// cooldown — otherwise a fresh 2-minute hit can be missed for many minutes.
+const productiveClis = new Map();
+function noteProductive(cli, rows) {
+  if (!rows?.length) return;
+  productiveClis.set(String(cli).toLowerCase(), { cli, at: Date.now() });
+}
+function productiveFresh() {
+  const cutoff = Date.now() - 30 * 60 * 1000;
+  return [...productiveClis.values()]
+    .filter((entry) => entry.at >= cutoff)
+    .sort((a, b) => b.at - a.at)
+    .map((entry) => entry.cli);
+}
 function uniqLower(list) {
   const seen = new Set();
   const out = [];
@@ -298,7 +313,7 @@ async function runCycle(lamixAccounts) {
     // must be checked immediately — a 2-minute-old hit is worthless if the
     // A-Z rotation reaches that CLI an hour later. Check fresh/hot first, then
     // fill the remaining slots with a full-pool A-Z rotation.
-    const early = uniqLower([...combinedFreshClis(), ...combinedHotClis()])
+    const early = uniqLower([...productiveFresh().slice(0, 60), ...combinedFreshClis(), ...combinedHotClis()])
       .filter((c) => allClis.includes(c) && !prioritySet.has(String(c).toLowerCase()))
       .slice(0, Math.min(restPerCycle, 350));
     const earlySet = new Set(early.map((c) => String(c).toLowerCase()));
@@ -345,6 +360,7 @@ async function runCycle(lamixAccounts) {
     const result = await account.searchCli(cli);
     const { rows, serverNowMs } = result;
     const failed = Boolean(result?.failed);
+    noteProductive(cli, rows);
     health.searchesDone += 1;
     health.paceMs = account.gapMs ?? health.paceMs;
     const alerts = [];
