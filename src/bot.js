@@ -81,7 +81,9 @@ async function sendOfflineTelegramNotice() {
       "⚠️ <b>BOT ALERT MODE DEGRADED</b>\n\n" +
       "Lamix lookup is not able to deliver new alerts.\n" +
       "The bot itself is still running.";
-    await sendTelegram({ token: config.telegram.token, chatId: "-1004451207079", text, parseMode: "HTML" });
+    for (const chatId of config.telegram.chatIds) {
+      await sendTelegram({ token: config.telegram.token, chatId, text, parseMode: "HTML" });
+    }
   } catch (err) {
     warn(`[telegram] offline notice failed: ${err.message}`);
     return false;
