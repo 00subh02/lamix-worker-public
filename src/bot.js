@@ -418,18 +418,15 @@ async function runCycle(lamixAccounts) {
     }
   };
 
-  let liveAccounts = accounts.filter((account) => account.rateLimitedForSeconds === 0);
+  const liveAccounts = accounts.filter((account) => account.rateLimitedForSeconds === 0);
   if (liveAccounts.length === 0 && accounts.length > 0) {
-    // All sessions are cooling down. Wait for the earliest one instead of
-    // burning the whole batch as instant failures (which killed the cycle).
-    const waitMs = Math.max(0, Math.min(...accounts.map((a) => a.blockedUntil)) - Date.now());
-    if (waitMs > 0 && waitMs < 90000) {
-      log(`[rate-limit] all accounts cooling down ${Math.ceil(waitMs / 1000)}s — waiting before continuing`);
-      await sleep(waitMs + 200);
-      liveAccounts = accounts.filter((account) => account.rateLimitedForSeconds === 0);
-    }
+    const waitSec = Math.ceil(Math.max(...accounts.map((a) => a.rateLimitedForSeconds)));
+    log(`[rate-limit] all ${accounts.length} accounts cooling down (~${waitSec}s) — pausing cycle`);
+    // Do NOT fall back to blocked accounts: every CLI would throw instantly,
+    // inflate rateLimitHits and make the watchdog rebuild healthy sessions.
+    return { sent: 0, cycles: [], attempts: 0, failures: 0, waitingForCooldown: true };
   }
-  const activeAccounts = liveAccounts.length ? liveAccounts : accounts;
+  const activeAccounts = liveAccounts;
   // Rotate Lark across every currently healthy session instead of permanently using one.
   const priorityClient = liveAccounts.length ? liveAccounts[(health.cycle - 1) % liveAccounts.length] : accounts[0];
   const priorityCycles = [];
@@ -794,6 +791,11 @@ async function main() {
       // download never delays Lamix searches (hot list updates atomically).
       if (signal) refreshSignalIfNeeded(signal, false).catch((e) => warn(`[signal] refresh failed: ${e.message}`));
       const cycleResult = await runCycle(activeLamixAccounts());
+      if (cycleResult.waitingForCooldown) {
+        const waitMs = Math.max(1000, Math.min(...lamixAccounts.map((a) => a.blockedUntil)) - Date.now());
+        await sleep(Math.min(waitMs + 500, 60000));
+        continue;
+      }
       if (cycleResult.attempts > 0 && cycleResult.failures === cycleResult.attempts) {
         health.lastError = "Lamix browser/session is not responding — every CLI failed in this cycle";
         health.consecutiveFailures += 1;

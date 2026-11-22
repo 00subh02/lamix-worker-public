@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updatedAt": "2026-11-22T04:27:42.277Z",
+  "updatedAt": "2026-11-22T04:33:31.723Z",
   "clis": [
     "12026882260",
     "12087641449",
@@ -32,6 +32,7 @@
     "53600",
     "63512",
     "8215229740",
+    "85747",
     "Access Code",
     "ADOBE",
     "AFROPARI",
@@ -90,7 +91,9 @@
     "Emirates",
     "Equals",
     "Exness",
+    "Faceb00k",
     "Facebook",
+    "Fbook",
     "FICA",
     "Fiverr",
     "FlyUnited",
@@ -127,6 +130,7 @@
     "Lalamove",
     "LANDBANK",
     "LAZADA",
+    "LC-Waikiki",
     "Libon",
     "Linebet",
     "LinkedIn",
@@ -166,6 +170,7 @@
     "OpenRice",
     "Ourbit",
     "OZON.UZ",
+    "PASSKOD",
     "PayPal",
     "Paysera",
     "PEGASUS",
@@ -247,6 +252,7 @@
     "UNFCU",
     "Uno",
     "Verify",
+    "VERISMS",
     "VFS",
     "Viber",
     "Viks",
@@ -257,6 +263,7 @@
     "Vodafone",
     "vshow",
     "WeChat",
+    "weplayapp",
     "WhatsApp",
     "Wildberries",
     "WinSpirit",
@@ -287,15 +294,15 @@
         "returned": 50
       },
       "failed": {
-        "total": 51369,
+        "total": 51243,
         "returned": 1000
       },
-      "hot": 198,
-      "fresh": 120
+      "hot": 180,
+      "fresh": 118
     },
-    "matrixHot": 198,
-    "matrixFresh": 120,
-    "lastMatrixAdded": 4,
-    "lastMatrixTotal": 268
+    "matrixHot": 180,
+    "matrixFresh": 118,
+    "lastMatrixAdded": 5,
+    "lastMatrixTotal": 275
   }
 }
