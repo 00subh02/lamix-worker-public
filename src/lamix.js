@@ -23,7 +23,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let sharedBrowser = null;
 let sharedBrowserPromise = null;
 
-async function getSharedBrowser(headless) {
+export async function getSharedBrowser(headless) {
   if (sharedBrowser?.isConnected()) return sharedBrowser;
   if (!sharedBrowserPromise) {
     sharedBrowserPromise = chromium
@@ -36,6 +36,10 @@ async function getSharedBrowser(headless) {
           "--disable-background-timer-throttling",
           "--disable-renderer-backgrounding",
           "--disable-backgrounding-occluded-windows",
+          "--disable-gpu",
+          "--disable-software-rasterizer",
+          "--disable-extensions",
+          "--disable-features=TranslateUI,BackForwardCache",
         ],
       })
       .then((browser) => {
@@ -47,6 +51,24 @@ async function getSharedBrowser(headless) {
       });
   }
   return sharedBrowserPromise;
+}
+
+export async function createLowMemoryContext(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 640, height: 480 },
+    deviceScaleFactor: 1,
+    locale: "en-US",
+    timezoneId: "UTC",
+    userAgent:
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+  });
+  // Images/fonts/media are never needed for text-based CLI searches.
+  await context.route("**/*", (route) => {
+    const type = route.request().resourceType();
+    if (type === "image" || type === "media" || type === "font") return route.abort();
+    return route.continue();
+  });
+  return context;
 }
 
 export async function closeSharedBrowser() {
@@ -108,13 +130,7 @@ export class LamixClient {
   async start() {
     this.logger.info("[lamix] opening CLI session (shared Chromium)");
     this.browser = await getSharedBrowser(this.headless);
-    this.context = await this.browser.newContext({
-      viewport: { width: 1280, height: 900 },
-      locale: "en-US",
-      timezoneId: "UTC",
-      userAgent:
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    });
+    this.context = await createLowMemoryContext(this.browser);
     this.page = await this.context.newPage();
     // Fail fast — every step that matters has its own explicit timeout.
     this.page.setDefaultTimeout(10000);
@@ -216,13 +232,7 @@ export class LamixClient {
         await this.stop();
         this.logger.warn(`[lamix] CLI Search unavailable — rebuilding browser session (attempt ${attempt})`);
         this.browser = await getSharedBrowser(this.headless);
-        this.context = await this.browser.newContext({
-          viewport: { width: 1280, height: 900 },
-          locale: "en-US",
-          timezoneId: "UTC",
-          userAgent:
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-        });
+        this.context = await createLowMemoryContext(this.browser);
         this.page = await this.context.newPage();
         this.page.setDefaultTimeout(10000);
         await this.login();

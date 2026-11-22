@@ -36,7 +36,7 @@ services:
       - key: MATRIX_REFRESH_MINUTES
         value: "2"
       - key: SIGNAL_ENABLED
-        value: "true"
+        value: "false"
       - key: SIGNAL_BASE_URL
         value: http://201.18.218.200:8080
       - key: SIGNAL_REFRESH_MINUTES

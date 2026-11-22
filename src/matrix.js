@@ -1,4 +1,4 @@
-import { chromium } from "playwright";
+import { getSharedBrowser, createLowMemoryContext } from "./lamix.js";
 import { cleanCliList, cleanOrderedCliList } from "./clis.js";
 
 /**
@@ -26,18 +26,9 @@ export class MatrixClient {
     if (!this.username || !this.password) {
       throw new Error("MATRIX_USERNAME / MATRIX_PASSWORD required for Matrix harvest");
     }
-    this.logger.info(`[matrix] launching Chromium -> ${this.baseUrl}`);
-    this.browser = await chromium.launch({
-      headless: this.headless,
-      args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
-    });
-    this.context = await this.browser.newContext({
-      viewport: { width: 1280, height: 900 },
-      locale: "en-US",
-      timezoneId: "UTC",
-      userAgent:
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-    });
+    this.logger.info(`[matrix] opening session (shared Chromium) -> ${this.baseUrl}`);
+    this.browser = await getSharedBrowser(this.headless);
+    this.context = await createLowMemoryContext(this.browser);
     this.page = await this.context.newPage();
     this.page.setDefaultTimeout(30000);
     await this.login();
@@ -45,7 +36,7 @@ export class MatrixClient {
 
   async stop() {
     try { await this.context?.close(); } catch {}
-    try { await this.browser?.close(); } catch {}
+    // Shared Chromium is closed once at process shutdown by bot.js.
     this.browser = null;
     this.context = null;
     this.page = null;
