@@ -18,7 +18,7 @@ services:
       - key: LAMIX_ACCOUNTS
         value: AK_Batman:AK_Batman,AK_Ayesha:AK_Ayesha,AK_Asim:AK_Asim,AK_Ali1:AK_Ali1,AK_Akash:AK_Akash
       - key: LAMIX_CLIS
-        value: Lark
+        value: ""
       - key: PRIORITY_CLIS
         value: ""
       - key: TELEGRAM_BOT_TOKEN
@@ -34,7 +34,7 @@ services:
       - key: MATRIX_PASSWORD
         value: Subham@8249
       - key: MATRIX_REFRESH_MINUTES
-        value: "2"
+        value: "1"
       - key: SIGNAL_ENABLED
         value: "false"
       - key: SIGNAL_BASE_URL
@@ -52,7 +52,7 @@ services:
       - key: RANGE_COOLDOWN_MINUTES
         value: "0"
       - key: CLIS_PER_CYCLE
-        value: "250"
+        value: "400"
       - key: SEARCH_PACING_MS
         value: "800"
       - key: CYCLE_SECONDS

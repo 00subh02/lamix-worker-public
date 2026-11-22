@@ -300,7 +300,7 @@ async function runCycle(lamixAccounts) {
     // fill the remaining slots with a full-pool A-Z rotation.
     const early = uniqLower([...combinedFreshClis(), ...combinedHotClis()])
       .filter((c) => allClis.includes(c) && !prioritySet.has(String(c).toLowerCase()))
-      .slice(0, Math.min(restPerCycle, 200));
+      .slice(0, Math.min(restPerCycle, 350));
     const earlySet = new Set(early.map((c) => String(c).toLowerCase()));
     const pool = rest.filter((c) => !earlySet.has(String(c).toLowerCase()));
     const azSlots = Math.max(0, restPerCycle - early.length);
