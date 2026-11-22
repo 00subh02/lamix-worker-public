@@ -269,9 +269,13 @@ export class LamixClient {
 
   async pace() {
     const now = Date.now();
-    const wait = this.nextSearchAt - now;
+    // Reserve the slot SYNCHRONOUSLY before awaiting. Otherwise concurrent
+    // searches all read the same old nextSearchAt, sleep the same gap, then
+    // fire together — a thundering herd the panel answers with empty rows.
+    const runAt = Math.max(now, this.nextSearchAt);
+    this.nextSearchAt = runAt + this.gapMs;
+    const wait = runAt - now;
     if (wait > 0) await sleep(wait);
-    this.nextSearchAt = Math.max(now, this.nextSearchAt) + this.gapMs;
     this.lastSearchAt = Date.now();
   }
 

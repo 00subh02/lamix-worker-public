@@ -443,17 +443,31 @@ async function runCycle(lamixAccounts) {
     sourcePool = useCold ? coldPool : hotPool;
   }
 
-  const settled = await Promise.all(
-    sourcePool.map(async (cli, index) => {
-      const account = activeAccounts[index % activeAccounts.length];
-      try {
-        const cycle = await checkCli(cli, account);
-        return cycle;
-      } catch (err) {
-        return { __error: true, cli, account, err };
-      }
-    }),
-  );
+  // Each account owns ONE page. Run its CLIs strictly one after another;
+  // concurrent searches on the same page raced the input/response and all
+  // fired in one burst, which the panel silently answered with empty rows.
+  // Different accounts still run in parallel with each other.
+  const byAccount = new Map();
+  sourcePool.forEach((cli, index) => {
+    const account = activeAccounts[index % activeAccounts.length];
+    if (!byAccount.has(account)) byAccount.set(account, []);
+    byAccount.get(account).push(cli);
+  });
+  const settled = (
+    await Promise.all(
+      [...byAccount].map(async ([account, clis]) => {
+        const out = [];
+        for (const cli of clis) {
+          try {
+            out.push(await checkCli(cli, account));
+          } catch (err) {
+            out.push({ __error: true, cli, account, err });
+          }
+        }
+        return out;
+      }),
+    )
+  ).flat();
   const cycles = [...priorityCycles];
   const errored = [];
   for (const result of settled) {
