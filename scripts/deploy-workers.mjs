@@ -103,18 +103,19 @@ for (const w of workers) {
   const created = await api(w.token, "/services", {
     method: "POST",
     body: JSON.stringify({
-      type: "web",
+      type: "web_service",
       name,
       ownerId: owner.id,
-      region: w.region ?? "oregon",
-      plan: w.plan ?? "free",
       repo: REPO,
       branch: "main",
       autoDeploy: true,
-      healthCheckPath: "/healthz",
-      dockerfilePath: "./Dockerfile",
-      dockerContext: ".",
       envVars,
+      serviceDetails: {
+        runtime: "docker",
+        plan: w.plan ?? "free",
+        region: w.region ?? "oregon",
+        healthCheckPath: "/healthz",
+      },
     }),
   });
   const svc = created.service ?? created;
