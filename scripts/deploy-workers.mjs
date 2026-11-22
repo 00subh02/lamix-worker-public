@@ -42,6 +42,11 @@ async function api(token, url, options = {}) {
   const text = await res.text();
   let body;
   try { body = text ? JSON.parse(text) : null; } catch { body = text; }
+  if (res.status === 429) {
+    const err = new Error(`rate-limited (reset in ${res.headers.get("ratelimit-reset") ?? "?"}s)`);
+    err.rateLimited = true;
+    throw err;
+  }
   if (!res.ok) {
     throw new Error(`${options.method ?? "GET"} ${url} -> ${res.status}: ${JSON.stringify(body).slice(0, 500)}`);
   }
@@ -56,6 +61,7 @@ for (const w of workers) {
   if (!w.token) throw new Error(`worker ${w.workerId}: missing token`);
   if (!w.lamixUsername || !w.lamixPassword) throw new Error(`worker ${w.workerId}: missing Lamix credentials`);
 
+  try {
   const owners = await api(w.token, "/owners");
   const ownerList = owners.map((o) => o.owner ?? o);
   const owner = w.ownerId
@@ -108,7 +114,7 @@ for (const w of workers) {
       ownerId: owner.id,
       repo: REPO,
       branch: "main",
-      autoDeploy: true,
+      autoDeployTrigger: "commit",
       envVars,
       serviceDetails: {
         runtime: "docker",
@@ -128,18 +134,23 @@ for (const w of workers) {
   if (url) {
     try {
       await api(w.token, `/services/${svc.id}/env-vars`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          envVars: [
-            env("SELF_PING_URL", `${url.replace(/\/+$/, "")}/healthz`),
-            env("SELF_PING_ENABLED", "true"),
-          ],
-        }),
+        method: "PUT",
+        body: JSON.stringify([
+          env("SELF_PING_URL", `${url.replace(/\/+$/, "")}/healthz`),
+          env("SELF_PING_ENABLED", "true"),
+        ]),
       });
       console.log(`       self-ping enabled -> ${url.replace(/\/+$/, "")}/healthz`);
     } catch (err) {
       console.log(`       WARN: could not auto-set self-ping: ${err.message}`);
     }
+  }
+  } catch (err) {
+    if (err.rateLimited) {
+      console.log(`SKIP  lamix-worker-${w.workerId}: rate-limited, rerun after reset.`);
+      continue;
+    }
+    throw err;
   }
 }
 console.log("Done. Verify each /healthz shows the right worker id and rising searchesDone.");
