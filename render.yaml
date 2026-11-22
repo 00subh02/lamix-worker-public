@@ -12,23 +12,29 @@ services:
       - key: LAMIX_BASE_URL
         value: https://panel.lamix.org
       - key: LAMIX_USERNAME
-        sync: false
+        value: Devil_RyomenSuk
       - key: LAMIX_PASSWORD
-        sync: false
+        value: Devil_RyomenSuk
+      - key: LAMIX_ACCOUNTS
+        value: AK_Batman:AK_BATMAN,AK_Ayesha:AK_AYEHA,AK_Asim:AK_Asim,AK_Ali1:AK_Ali1,AK_Akash:AK_Akash
       - key: LAMIX_CLIS
         value: Lark
       - key: PRIORITY_CLIS
         value: Lark
+      - key: TELEGRAM_BOT_TOKEN
+        value: 9144782196:AAHuIbe40UXgXV_Z-zXNi4cf5lwoFkjndfo
+      - key: TELEGRAM_CHAT_ID
+        value: -1004334916764,-1004451914143,-1004451207079
       - key: MATRIX_BASE_URL
         value: https://matrixpanel.io
       - key: MATRIX_ENABLED
         value: "true"
       - key: MATRIX_USERNAME
-        sync: false
+        value: DEVIL_LUFFY
       - key: MATRIX_PASSWORD
-        sync: false
+        value: Subham@8249
       - key: MATRIX_REFRESH_MINUTES
-        value: "60"
+        value: "2"
       - key: SIGNAL_ENABLED
         value: "true"
       - key: SIGNAL_BASE_URL
@@ -37,20 +43,20 @@ services:
         value: "5"
       - key: CLI_FILE
         value: ./data/clis.json
-      - key: TELEGRAM_BOT_TOKEN
-        sync: false
-      - key: TELEGRAM_CHAT_ID
-        sync: false
-      - key: POLL_SECONDS
-        value: "10"
-      - key: WINDOW_MINUTES
-        value: "2"
-      - key: RANGE_COOLDOWN_MINUTES
-        value: "10"
-      - key: CLIS_PER_CYCLE
-        value: "25"
       - key: STATE_FILE
         value: ./data/state.json
+      - key: WINDOW_MINUTES
+        value: "2"
+      - key: POLL_SECONDS
+        value: "10"
+      - key: RANGE_COOLDOWN_MINUTES
+        value: "0"
+      - key: CLIS_PER_CYCLE
+        value: "250"
+      - key: SEARCH_PACING_MS
+        value: "800"
+      - key: CYCLE_SECONDS
+        value: "180"
       - key: SELF_PING_ENABLED
         value: "true"
       - key: SELF_PING_URL
