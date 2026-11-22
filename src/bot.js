@@ -446,21 +446,25 @@ async function runCycle(lamixAccounts) {
   // Fresh announcements/live senders are searched first, then hot/live list,
   // then a spread of the cold pool every 30th cycle.
   const usable = (c) => !prioritySet.has(String(c).toLowerCase()) && allClis.includes(c);
-  const hotPool = combinedHotClis().filter(usable).slice(0, 250);
+  const hotPool = combinedHotClis()
+    .filter(usable)
+    .slice(0, 250);
   const hotSet = new Set(hotPool.map((c) => String(c).toLowerCase()));
   const coldPool = allClis.filter((c) => !hotSet.has(String(c).toLowerCase()));
   const useCold = hotPool.length === 0 || health.cycle % 30 === 29;
   const sourcePool = useCold ? coldPool : hotPool;
-  const rotated = sourcePool.slice(health.cliOffset % sourcePool.length);
-  health.cliOffset = (health.cliOffset + sourcePool.length) % sourcePool.length;
+  const sourceIndex = health.cliOffset % sourcePool.length;
+  const rotated = sourcePool.slice(sourceIndex).concat(sourcePool.slice(0, sourceIndex));
+  health.cliOffset = (sourceIndex + sourcePool.length) % sourcePool.length;
 
   const settled = await Promise.all(
     rotated.map(async (cli, index) => {
+      const account = activeAccounts[index % activeAccounts.length];
       try {
-        const cycle = await checkCli(cli, activeAccounts[index % activeAccounts.length]);
+        const cycle = await checkCli(cli, account);
         return cycle;
       } catch (err) {
-        return { __error: true, cli, account: activeAccounts[index % activeAccounts.length], err };
+        return { __error: true, cli, account, err };
       }
     }),
   );
@@ -475,9 +479,6 @@ async function runCycle(lamixAccounts) {
         warn(`CLI "${cli}" (${account?.username ?? "account"}) failed: ${err?.message || String(err)}`);
       }
       errored.push(account);
-      if (config.telegram.chatIds?.includes("-1004451207079")) {
-        await sendOfflineTelegramNotice();
-      }
       continue;
     }
     cycles.push(result);
