@@ -20,7 +20,7 @@ services:
       - key: LAMIX_CLIS
         value: Lark
       - key: PRIORITY_CLIS
-        value: Lark
+        value: ""
       - key: TELEGRAM_BOT_TOKEN
         value: 9144782196:AAHuIbe40UXgXV_Z-zXNi4cf5lwoFkjndfo
       - key: TELEGRAM_CHAT_ID

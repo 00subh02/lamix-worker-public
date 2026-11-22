@@ -66,7 +66,11 @@ export function loadConfig() {
   const maxClis = int("MAX_CLIS", 0, { min: 0 }); // 0 = unlimited
   const clisPerCycle = int("CLIS_PER_CYCLE", 12, { min: 0 }); // 0 = all each cycle
   const matrixRefreshMinutes = int("MATRIX_REFRESH_MINUTES", 60, { min: 1, max: 1440 });
-  const priorityClis = parseClis(process.env.PRIORITY_CLIS || "Lark");
+  // Empty PRIORITY_CLIS intentionally disables priority — users can prioritize a CLI via LAMIX_CLIS too.
+  const priorityClis =
+    process.env.PRIORITY_CLIS !== undefined
+      ? parseClis(process.env.PRIORITY_CLIS)
+      : parseClis(process.env.LAMIX_CLIS || "");
   const extraLamixAccounts = parseAccounts(process.env.LAMIX_ACCOUNTS || "");
   const searchWindowHours = int("SEARCH_WINDOW_HOURS", 24, { min: 1, max: 168 });
 
