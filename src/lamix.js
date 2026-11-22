@@ -18,8 +18,8 @@ export class RateLimitError extends Error {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // All six Lamix accounts share ONE Chromium process. Each account still gets
-// an isolated browser context (separate cookies/session), but this keeps the
-// memory footprint small enough for Render's free 512 MB instance.
+// an isolated browser context (separate cookies/session). This is the default
+// for every host (PC or Render); full-size viewports keep panel locators stable.
 let sharedBrowser = null;
 let sharedBrowserPromise = null;
 
@@ -39,9 +39,6 @@ export async function getSharedBrowser(headless) {
           "--disable-gpu",
           "--disable-software-rasterizer",
           "--disable-extensions",
-          "--disable-features=site-per-process,TranslateUI,BackForwardCache",
-          "--renderer-process-limit=1",
-          "--disable-ipc-flooding-protection",
         ],
       })
       .then((browser) => {
@@ -55,22 +52,15 @@ export async function getSharedBrowser(headless) {
   return sharedBrowserPromise;
 }
 
-export async function createLowMemoryContext(browser) {
-  const context = await browser.newContext({
-    viewport: { width: 480, height: 360 },
+export async function createBrowserContext(browser) {
+  return browser.newContext({
+    viewport: { width: 1280, height: 900 },
     deviceScaleFactor: 1,
     locale: "en-US",
     timezoneId: "UTC",
     userAgent:
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
   });
-  // Images/fonts/media are never needed for text-based CLI searches.
-  await context.route("**/*", (route) => {
-    const type = route.request().resourceType();
-    if (type === "image" || type === "media" || type === "font") return route.abort();
-    return route.continue();
-  });
-  return context;
 }
 
 export async function closeSharedBrowser() {
@@ -132,7 +122,7 @@ export class LamixClient {
   async start() {
     this.logger.info("[lamix] opening CLI session (shared Chromium)");
     this.browser = await getSharedBrowser(this.headless);
-    this.context = await createLowMemoryContext(this.browser);
+    this.context = await createBrowserContext(this.browser);
     this.page = await this.context.newPage();
     // Fail fast — every step that matters has its own explicit timeout.
     this.page.setDefaultTimeout(10000);
@@ -234,7 +224,7 @@ export class LamixClient {
         await this.stop();
         this.logger.warn(`[lamix] CLI Search unavailable — rebuilding browser session (attempt ${attempt})`);
         this.browser = await getSharedBrowser(this.headless);
-        this.context = await createLowMemoryContext(this.browser);
+        this.context = await createBrowserContext(this.browser);
         this.page = await this.context.newPage();
         this.page.setDefaultTimeout(10000);
         await this.login();

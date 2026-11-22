@@ -1,4 +1,4 @@
-import { getSharedBrowser, createLowMemoryContext } from "./lamix.js";
+import { getSharedBrowser, createBrowserContext } from "./lamix.js";
 import { cleanCliList, cleanOrderedCliList } from "./clis.js";
 
 /**
@@ -28,7 +28,7 @@ export class MatrixClient {
     }
     this.logger.info(`[matrix] opening session (shared Chromium) -> ${this.baseUrl}`);
     this.browser = await getSharedBrowser(this.headless);
-    this.context = await createLowMemoryContext(this.browser);
+    this.context = await createBrowserContext(this.browser);
     this.page = await this.context.newPage();
     this.page.setDefaultTimeout(30000);
     await this.login();

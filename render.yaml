@@ -16,7 +16,7 @@ services:
       - key: LAMIX_PASSWORD
         value: Devil_RyomenSuk
       - key: LAMIX_ACCOUNTS
-        value: AK_Batman:AK_BATMAN,AK_Ayesha:AK_AYEHA,AK_Asim:AK_Asim,AK_Ali1:AK_Ali1,AK_Akash:AK_Akash
+        value: AK_Batman:AK_Batman,AK_Ayesha:AK_Ayesha,AK_Asim:AK_Asim,AK_Ali1:AK_Ali1,AK_Akash:AK_Akash
       - key: LAMIX_CLIS
         value: Lark
       - key: PRIORITY_CLIS

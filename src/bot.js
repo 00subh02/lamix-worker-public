@@ -416,23 +416,21 @@ async function runCycle(lamixAccounts) {
   }
   await sendAlerts(priorityCycles);
 
-  // Matrix sources go first: live_feed, announcements, then failed_messages.
-  // Fresh announcements/live senders are searched first, then hot/live list,
-  // then a spread of the cold pool every 30th cycle.
-  const usable = (c) => !prioritySet.has(String(c).toLowerCase()) && allClis.includes(c);
-  const hotPool = combinedHotClis()
-    .filter(usable)
-    .slice(0, 250);
-  const hotSet = new Set(hotPool.map((c) => String(c).toLowerCase()));
-  const coldPool = allClis.filter((c) => !hotSet.has(String(c).toLowerCase()));
-  const useCold = hotPool.length === 0 || health.cycle % 30 === 29;
-  const sourcePool = useCold ? coldPool : hotPool;
-  const sourceIndex = health.cliOffset % sourcePool.length;
-  const rotated = sourcePool.slice(sourceIndex).concat(sourcePool.slice(0, sourceIndex));
-  health.cliOffset = (sourceIndex + sourcePool.length) % sourcePool.length;
+  // A-Z full-pool mode: check only the current rotated batch so every CLI in
+  // the 10k+ store gets covered evenly. Matrix-sourced CLIs are stored in
+  // allClis and rotate in with the rest — no hot/Lark tier gets priority.
+  let sourcePool = restBatch;
+  if (config.clisPerCycle <= 0) {
+    const usable = (c) => !prioritySet.has(String(c).toLowerCase()) && allClis.includes(c);
+    const hotPool = combinedHotClis().filter(usable).slice(0, 250);
+    const hotSet = new Set(hotPool.map((c) => String(c).toLowerCase()));
+    const coldPool = allClis.filter((c) => !hotSet.has(String(c).toLowerCase()));
+    const useCold = hotPool.length === 0 || health.cycle % 30 === 29;
+    sourcePool = useCold ? coldPool : hotPool;
+  }
 
   const settled = await Promise.all(
-    rotated.map(async (cli, index) => {
+    sourcePool.map(async (cli, index) => {
       const account = activeAccounts[index % activeAccounts.length];
       try {
         const cycle = await checkCli(cli, account);
