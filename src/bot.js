@@ -294,19 +294,26 @@ async function runCycle(lamixAccounts) {
     const rest = allFresh.filter((c) => !prioritySet.has(String(c).toLowerCase()));
     const restPerCycle = Math.max(0, config.clisPerCycle - priorityInList.length);
 
-    // Full-pool, alphabetical spread: A to Z. No hot/fresh tiers so every
-    // CLI gets equal coverage each minute. Offset advances through the WHOLE
-    // pool (not the batch size), otherwise the same first 250 CLIs repeat.
-    const totalRest = rest.length;
+    // Time-sensitive CLIs from Matrix (live_feed, announcements, failed_messages)
+    // must be checked immediately — a 2-minute-old hit is worthless if the
+    // A-Z rotation reaches that CLI an hour later. Check fresh/hot first, then
+    // fill the remaining slots with a full-pool A-Z rotation.
+    const early = uniqLower([...combinedFreshClis(), ...combinedHotClis()])
+      .filter((c) => allClis.includes(c) && !prioritySet.has(String(c).toLowerCase()))
+      .slice(0, Math.min(restPerCycle, 200));
+    const earlySet = new Set(early.map((c) => String(c).toLowerCase()));
+    const pool = rest.filter((c) => !earlySet.has(String(c).toLowerCase()));
+    const azSlots = Math.max(0, restPerCycle - early.length);
+    const totalRest = pool.length;
     const offset = totalRest ? health.cliOffset % totalRest : 0;
-    const batchRest = rest.slice(offset, offset + restPerCycle);
-    if (batchRest.length < restPerCycle && totalRest > 0) {
-      batchRest.push(...rest.slice(0, restPerCycle - batchRest.length));
+    const batchRest = pool.slice(offset, offset + azSlots);
+    if (batchRest.length < azSlots && totalRest > 0) {
+      batchRest.push(...pool.slice(0, azSlots - batchRest.length));
     }
-    health.cliOffset = totalRest ? (offset + restPerCycle) % totalRest : 0;
-    batch = [...priorityInList, ...batchRest];
+    health.cliOffset = totalRest ? (offset + azSlots) % totalRest : 0;
+    batch = [...priorityInList, ...early, ...batchRest];
     log(
-      `[batch] searching ${batch.length}/${total} CLIs (A to Z + priority ${priorityInList.join(",") || "none"} · offset ${offset}/${totalRest})`,
+      `[batch] searching ${batch.length}/${total} CLIs (Matrix fresh/hot ${early.length} + A-Z ${batchRest.length} · priority ${priorityInList.join(",") || "none"} · offset ${offset}/${totalRest})`,
     );
   } else {
     // No batching — priority first, then hot CLIs, then the rest.
