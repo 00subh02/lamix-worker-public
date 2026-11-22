@@ -118,7 +118,27 @@ for (const w of workers) {
     }),
   });
   const svc = created.service ?? created;
+  const url = svc.serviceDetails?.url ?? svc.url ?? "";
   console.log(`CREATE ${name}: region=${w.region ?? "oregon"} owner=${owner.id} id=${svc.id}`);
-  console.log(`       url=${svc.serviceDetails?.url ?? svc.url ?? "pending"}`);
+  console.log(`       url=${url || "pending"}`);
+
+  // Free Render services spin down without inbound traffic. Turn self-ping on
+  // as soon as the URL is known so this worker stays awake 24/7.
+  if (url) {
+    try {
+      await api(w.token, `/services/${svc.id}/env-vars`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          envVars: [
+            env("SELF_PING_URL", `${url.replace(/\/+$/, "")}/healthz`),
+            env("SELF_PING_ENABLED", "true"),
+          ],
+        }),
+      });
+      console.log(`       self-ping enabled -> ${url.replace(/\/+$/, "")}/healthz`);
+    } catch (err) {
+      console.log(`       WARN: could not auto-set self-ping: ${err.message}`);
+    }
+  }
 }
-console.log("Done. Set SELF_PING_URL=<service-url>/healthz on each service after first deploy.");
+console.log("Done. Verify each /healthz shows the right worker id and rising searchesDone.");
