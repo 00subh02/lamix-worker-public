@@ -292,43 +292,15 @@ async function runCycle(lamixAccounts) {
     const rest = allFresh.filter((c) => !prioritySet.has(String(c).toLowerCase()));
     const restPerCycle = Math.max(0, config.clisPerCycle - priorityInList.length);
 
-    // Split the pool into tiers so live senders get checked far more often:
-    //   fresh = activity in the last ~5 min (half of the batch)
-    //   hot   = recently active, ranked by volume (remaining half)
-    //   cold  = full pool rotation, every 6th cycle so nothing is forgotten
-    const allLower = new Set(allClis.map((c) => String(c).toLowerCase()));
-    const usable = (c) => !prioritySet.has(String(c).toLowerCase()) && allLower.has(String(c).toLowerCase());
-    const hotPool = combinedHotClis().filter(usable);
-    const freshSet = new Set(combinedFreshClis().map((c) => String(c).toLowerCase()));
-    const freshPool = hotPool.filter((c) => freshSet.has(String(c).toLowerCase()));
-    const warmPool = hotPool.filter((c) => !freshSet.has(String(c).toLowerCase()));
-
-    const take = (pool, count, key) => {
-      if (count <= 0 || pool.length === 0) return [];
-      const start = (health[key] ?? 0) % pool.length;
-      const out = [];
-      for (let i = 0; i < Math.min(count, pool.length); i++) out.push(pool[(start + i) % pool.length]);
-      health[key] = (start + Math.min(count, pool.length)) % pool.length;
-      return out;
-    };
-
-    const useCold = hotPool.length === 0 || health.cycle % 30 === 29;
-    let restBatch = [];
-    let mode = "cold";
-    if (!useCold) {
-      const freshQuota = freshPool.length ? Math.ceil(restPerCycle * 0.5) : 0;
-      const freshBatch = take(freshPool, freshQuota, "freshOffset");
-      const restQuota = restPerCycle - freshBatch.length;
-      const warmBatch = take(warmPool.length ? warmPool : hotPool, restQuota, "cliOffset");
-      restBatch = [...freshBatch, ...warmBatch];
-      mode = `fresh ${freshBatch.length} + hot ${warmBatch.length}`;
-    } else {
-      restBatch = take(rest, restPerCycle, "cliOffset");
-    }
-    batch = [...priorityInList, ...restBatch];
+    // Full-pool, alphabetical spread: A to Z. No hot/fresh tiers so every
+    // CLI gets equal coverage each minute.
+    const batchRest = rest.slice(0, restPerCycle);
+    const offset = health.cliOffset % batchRest.length;
+    const rotated = batchRest.slice(offset).concat(batchRest.slice(0, offset));
+    health.cliOffset = (offset + rotated.length) % batchRest.length;
+    batch = [...priorityInList, ...rotated];
     log(
-      `[batch] searching ${batch.length}/${total} CLIs (priority ${priorityInList.join(",") || "none"} + ${mode} · ` +
-        `fresh ${freshPool.length} / hot ${hotPool.length} / cold ${rest.length} · next fresh=${health.freshOffset} hot=${health.cliOffset})`,
+      `[batch] searching ${batch.length}/${total} CLIs (A to Z + priority ${priorityInList.join(",") || "none"} · offset ${offset}/${batchRest.length})`,
     );
   } else {
     // No batching — priority first, then hot CLIs, then the rest.
