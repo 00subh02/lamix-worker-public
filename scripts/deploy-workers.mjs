@@ -70,6 +70,7 @@ function buildEnvVars(w, url) {
     env("LAMIX_PASSWORD", w.lamixPassword),
     env("TELEGRAM_BOT_TOKEN", process.env.TELEGRAM_BOT_TOKEN),
     env("TELEGRAM_CHAT_ID", process.env.TELEGRAM_CHAT_ID ?? "-1004451914143"),
+    env("TELEGRAM_COMMANDS_ENABLED", "false"), // only one bot instance may poll getUpdates
     env("MATRIX_USERNAME", process.env.MATRIX_USERNAME),
     env("MATRIX_PASSWORD", process.env.MATRIX_PASSWORD),
     env("MATRIX_REFRESH_MINUTES", "1"),
