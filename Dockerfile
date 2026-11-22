@@ -11,6 +11,9 @@ RUN npm ci --omit=dev
 COPY src ./src
 COPY scripts ./scripts
 
+# Seed the persistent CLI store so a cold start already has 17k+ CLIs.
+# Matrix refresh keeps adding live_feed / announcement / failed-message CLIs.
+COPY data ./data
 RUN mkdir -p ./data
 ENV NODE_ENV=production
 ENV TZ=UTC
