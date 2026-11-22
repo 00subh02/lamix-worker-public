@@ -442,24 +442,30 @@ async function runCycle(lamixAccounts) {
   }
   await sendAlerts(priorityCycles);
 
-  // 2) Rotate the rest in parallel across every independent Lamix session.
-  // Each account has its own rate limiter, so a cool-down on one session does not stop the others.
-  const cycles = [...priorityCycles];
-  const assignments = restBatch.map((cli, index) => ({
-    cli,
-    account: activeAccounts[index % activeAccounts.length],
-  }));
-  const errored = [];
+  // Matrix sources go first: live_feed, announcements, then failed_messages.
+  // Fresh announcements/live senders are searched first, then hot/live list,
+  // then a spread of the cold pool every 30th cycle.
+  const usable = (c) => !prioritySet.has(String(c).toLowerCase()) && allClis.includes(c);
+  const hotPool = combinedHotClis().filter(usable).slice(0, 250);
+  const hotSet = new Set(hotPool.map((c) => String(c).toLowerCase()));
+  const coldPool = allClis.filter((c) => !hotSet.has(String(c).toLowerCase()));
+  const useCold = hotPool.length === 0 || health.cycle % 30 === 29;
+  const sourcePool = useCold ? coldPool : hotPool;
+  const rotated = sourcePool.slice(health.cliOffset % sourcePool.length);
+  health.cliOffset = (health.cliOffset + sourcePool.length) % sourcePool.length;
+
   const settled = await Promise.all(
-    assignments.map(async ({ cli, account }) => {
+    rotated.map(async (cli, index) => {
       try {
-        const cycle = await checkCli(cli, account);
+        const cycle = await checkCli(cli, activeAccounts[index % activeAccounts.length]);
         return cycle;
       } catch (err) {
-        return { __error: true, cli, account, err };
+        return { __error: true, cli, account: activeAccounts[index % activeAccounts.length], err };
       }
     }),
   );
+  const cycles = [...priorityCycles];
+  const errored = [];
   for (const result of settled) {
     if (result?.__error) {
       const { cli, account, err } = result;
