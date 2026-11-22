@@ -1,6 +1,6 @@
 import http from "node:http";
 import { loadConfig } from "./config.js";
-import { LamixClient, AuthError, RateLimitError, sleep } from "./lamix.js";
+import { LamixClient, AuthError, RateLimitError, sleep, closeSharedBrowser } from "./lamix.js";
 import { MatrixClient } from "./matrix.js";
 import { SignalPulseClient } from "./signal.js";
 import { State } from "./state.js";
@@ -648,6 +648,7 @@ async function main() {
     server?.close();
     await Promise.allSettled(lamixAccounts.map((account) => account.stop()));
     await matrix?.stop().catch(() => {});
+    await closeSharedBrowser();
     // Graceful: don't exit immediately, let Render kill if needed
     setTimeout(() => process.exit(0), 5000).unref?.();
   };
@@ -684,6 +685,7 @@ async function main() {
     console.log(JSON.stringify(cliStore.snapshot(), null, 2));
     await Promise.allSettled(lamixAccounts.map((account) => account.stop()));
     await matrix?.stop().catch(() => {});
+    await closeSharedBrowser();
     server?.close();
     return;
   }
@@ -752,6 +754,7 @@ async function main() {
   }
   await Promise.allSettled(lamixAccounts.map((account) => account.stop()));
   await matrix?.stop().catch(() => {});
+  await closeSharedBrowser();
   server?.close();
   log("stopped");
 }

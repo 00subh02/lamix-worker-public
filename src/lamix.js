@@ -17,6 +17,47 @@ export class RateLimitError extends Error {
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// All six Lamix accounts share ONE Chromium process. Each account still gets
+// an isolated browser context (separate cookies/session), but this keeps the
+// memory footprint small enough for Render's free 512 MB instance.
+let sharedBrowser = null;
+let sharedBrowserPromise = null;
+
+async function getSharedBrowser(headless) {
+  if (sharedBrowser?.isConnected()) return sharedBrowser;
+  if (!sharedBrowserPromise) {
+    sharedBrowserPromise = chromium
+      .launch({
+        headless,
+        args: [
+          "--no-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-blink-features=AutomationControlled",
+          "--disable-background-timer-throttling",
+          "--disable-renderer-backgrounding",
+          "--disable-backgrounding-occluded-windows",
+        ],
+      })
+      .then((browser) => {
+        sharedBrowser = browser;
+        return browser;
+      })
+      .finally(() => {
+        sharedBrowserPromise = null;
+      });
+  }
+  return sharedBrowserPromise;
+}
+
+export async function closeSharedBrowser() {
+  const browser = sharedBrowser;
+  sharedBrowser = null;
+  sharedBrowserPromise = null;
+  try {
+    await browser?.close();
+  } catch {}
+}
+
 export class LamixClient {
   constructor({
     baseUrl,
@@ -65,18 +106,8 @@ export class LamixClient {
   }
 
   async start() {
-    this.logger.info("[lamix] launching Chromium");
-    this.browser = await chromium.launch({
-      headless: this.headless,
-      args: [
-        "--no-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-blink-features=AutomationControlled",
-        "--disable-background-timer-throttling",
-        "--disable-renderer-backgrounding",
-        "--disable-backgrounding-occluded-windows",
-      ],
-    });
+    this.logger.info("[lamix] opening CLI session (shared Chromium)");
+    this.browser = await getSharedBrowser(this.headless);
     this.context = await this.browser.newContext({
       viewport: { width: 1280, height: 900 },
       locale: "en-US",
@@ -96,9 +127,7 @@ export class LamixClient {
     try {
       await this.context?.close();
     } catch {}
-    try {
-      await this.browser?.close();
-    } catch {}
+    // Keep the shared Chromium process alive for the other accounts.
     this.browser = null;
     this.context = null;
     this.page = null;
@@ -186,17 +215,7 @@ export class LamixClient {
       try {
         await this.stop();
         this.logger.warn(`[lamix] CLI Search unavailable — rebuilding browser session (attempt ${attempt})`);
-        this.browser = await chromium.launch({
-          headless: this.headless,
-          args: [
-            "--no-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-blink-features=AutomationControlled",
-            "--disable-background-timer-throttling",
-            "--disable-renderer-backgrounding",
-            "--disable-backgrounding-occluded-windows",
-          ],
-        });
+        this.browser = await getSharedBrowser(this.headless);
         this.context = await this.browser.newContext({
           viewport: { width: 1280, height: 900 },
           locale: "en-US",
