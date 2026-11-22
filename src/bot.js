@@ -622,7 +622,7 @@ async function main() {
 
   // Start every Lamix session independently; one failed account must not block the others.
   const startResults = await Promise.allSettled(lamixAccounts.map((account) => account.start()));
-  const workingLamixAccounts = lamixAccounts.filter((_, index) => startResults[index]?.status === "fulfilled");
+  let workingLamixAccounts = lamixAccounts.filter((_, index) => startResults[index]?.status === "fulfilled");
   startResults.forEach((result, index) => {
     const rel = lamixAccounts[index];
     if (result.status === "fulfilled") {
@@ -692,6 +692,28 @@ async function main() {
 
   const activeLamixAccounts = () => (workingLamixAccounts.length ? workingLamixAccounts : lamixAccounts);
 
+  // Retry any account that failed its initial login. Without this, one slow
+  // page load permanently removes that account from the search pool.
+  let accountRetryInFlight = false;
+  const retryFailedAccounts = async () => {
+    if (accountRetryInFlight || workingLamixAccounts.length === lamixAccounts.length) return;
+    accountRetryInFlight = true;
+    try {
+      for (const account of lamixAccounts) {
+        if (workingLamixAccounts.includes(account)) continue;
+        try {
+          await account.start();
+          workingLamixAccounts.push(account);
+          log(`[lamix] account "${account.username}" recovered and joined the search pool`);
+        } catch (err) {
+          warn(`[lamix] account "${account.username}" retry failed: ${err.message}`);
+        }
+      }
+    } finally {
+      accountRetryInFlight = false;
+    }
+  };
+
   while (running) {
     const startedAt = Date.now();
     health.cycle += 1;
@@ -702,6 +724,7 @@ async function main() {
         health.lamixRestarts += 1;
         restartRequested = false;
       }
+      void retryFailedAccounts();
       if (matrix) await refreshMatrixIfNeeded(matrix, false);
       // SignalPulse refresh is HTTP-only; run it in the background so a slow
       // download never delays Lamix searches (hot list updates atomically).
