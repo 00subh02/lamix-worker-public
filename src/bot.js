@@ -295,14 +295,18 @@ async function runCycle(lamixAccounts) {
     const restPerCycle = Math.max(0, config.clisPerCycle - priorityInList.length);
 
     // Full-pool, alphabetical spread: A to Z. No hot/fresh tiers so every
-    // CLI gets equal coverage each minute.
-    const batchRest = rest.slice(0, restPerCycle);
-    const offset = health.cliOffset % batchRest.length;
-    const rotated = batchRest.slice(offset).concat(batchRest.slice(0, offset));
-    health.cliOffset = (offset + rotated.length) % batchRest.length;
-    batch = [...priorityInList, ...rotated];
+    // CLI gets equal coverage each minute. Offset advances through the WHOLE
+    // pool (not the batch size), otherwise the same first 250 CLIs repeat.
+    const totalRest = rest.length;
+    const offset = totalRest ? health.cliOffset % totalRest : 0;
+    const batchRest = rest.slice(offset, offset + restPerCycle);
+    if (batchRest.length < restPerCycle && totalRest > 0) {
+      batchRest.push(...rest.slice(0, restPerCycle - batchRest.length));
+    }
+    health.cliOffset = totalRest ? (offset + restPerCycle) % totalRest : 0;
+    batch = [...priorityInList, ...batchRest];
     log(
-      `[batch] searching ${batch.length}/${total} CLIs (A to Z + priority ${priorityInList.join(",") || "none"} · offset ${offset}/${batchRest.length})`,
+      `[batch] searching ${batch.length}/${total} CLIs (A to Z + priority ${priorityInList.join(",") || "none"} · offset ${offset}/${totalRest})`,
     );
   } else {
     // No batching — priority first, then hot CLIs, then the rest.
