@@ -5,20 +5,24 @@ export function escapeHtml(value) {
     .replace(/>/g, "&gt;");
 }
 
-export async function sendTelegram({ token, chatId, text, dryRun = false, logger = console }) {
+export async function sendTelegram({ token, chatId, text, entities, dryRun = false, logger = console }) {
   if (dryRun) {
     logger.info(`[dry-run] Telegram message:\n${text}`);
     return { ok: true, dryRun: true };
   }
+  const payload = {
+    chat_id: chatId,
+    text,
+    disable_web_page_preview: true,
+  };
+  // Premium custom emoji requires the entities array. Do not combine it with
+  // parse_mode — Telegram rejects messages that set both.
+  if (entities && entities.length) payload.entities = entities;
+  else payload.parse_mode = "HTML";
   const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text,
-      parse_mode: "HTML",
-      disable_web_page_preview: true,
-    }),
+    body: JSON.stringify(payload),
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok || body.ok !== true) {

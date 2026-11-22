@@ -5,7 +5,8 @@ import { MatrixClient } from "./matrix.js";
 import { SignalPulseClient } from "./signal.js";
 import { State } from "./state.js";
 import { CliStore } from "./clis.js";
-import { escapeHtml, sendTelegram, splitMessage, discoverChatId, verifyBot } from "./telegram.js";
+import { sendTelegram, discoverChatId, verifyBot } from "./telegram.js";
+import { buildAlertMessage, splitAlertMessage } from "./alert-format.js";
 import { startTelegramCommandPolling } from "./commands.js";
 
 const config = loadConfig();
@@ -134,61 +135,6 @@ function formatIstStamp(ms) {
   const mon = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getUTCMonth()];
   return `${String(d.getUTCDate()).padStart(2, "0")} ${mon} ${d.getUTCFullYear()} · ${formatIstShort(ms)}`;
 }
-function buildMessage(cycles, total) {
-  const nowMs = Math.max(...cycles.map((c) => c.serverNowMs));
-  const clisTracked = cliStore.clis.length;
-  const checked = cycles.length;
-
-  const prioritySet = new Set((config.priorityClis ?? []).map((c) => String(c).toLowerCase()));
-  const hasPriorityHit = cycles.some(
-    (c) => c.alerts.length > 0 && prioritySet.has(String(c.cli).toLowerCase()),
-  );
-
-  // Sort: priority CLIs first, then by alert count desc
-  const sortedCycles = [...cycles].sort((a, b) => {
-    const aP = prioritySet.has(String(a.cli).toLowerCase()) ? 0 : 1;
-    const bP = prioritySet.has(String(b.cli).toLowerCase()) ? 0 : 1;
-    if (aP !== bP) return aP - bP;
-    return (b.alerts.length || 0) - (a.alerts.length || 0);
-  });
-
-  const rangeWord = total === 1 ? "RANGE" : "RANGES";
-  const cliWord = checked === 1 ? "CLI" : "CLIs";
-  const priorityNames = [...new Set(
-    cycles
-      .filter((c) => c.alerts.length && prioritySet.has(String(c.cli).toLowerCase()))
-      .map((c) => String(c.cli).toUpperCase()),
-  )];
-  const priorityLabel = priorityNames.length === 1 ? priorityNames[0] : "PRIORITY";
-
-  const lines = [
-    `🚨 <b>LAMIX CLI ALERT</b>`,
-    `${formatIstStamp(nowMs)} · 0-${config.windowMinutes} MIN · ${total} ${rangeWord}`,
-  ];
-  if (hasPriorityHit) lines.push(`<b>PRIORITY HIT — ${escapeHtml(priorityLabel)}</b>`);
-  lines.push("");
-
-  for (const cycle of sortedCycles) {
-    if (!cycle.alerts.length) continue;
-    const multi = cycle.alerts.length > 1;
-    lines.push(`<b>CLI:</b> <code>${escapeHtml(cycle.cli)}</code>`);
-    cycle.alerts.forEach((a, i) => {
-      const num = multi ? `${i + 1}. ` : "";
-      lines.push(
-        `<b>${num}Range:</b> <code>${escapeHtml(a.range)}</code>`,
-        `<b>Time:</b> ${formatAge(a.ageMs)} · ${formatIstShort(a.lastSeenMs)}`,
-      );
-    });
-    lines.push("");
-  }
-
-  lines.push(
-    `Source: lamix panel · 0-${config.windowMinutes} min`,
-    `${checked} ${cliWord} checked · ${clisTracked} tracked · ${config.pollSeconds}s poll`,
-  );
-  return lines.join("\n");
-}
-
 async function refreshSignalIfNeeded(signal, force = false) {
   if (!config.signal.enabled) return;
   if (signalRefreshing) return;
@@ -399,12 +345,25 @@ async function runCycle(lamixAccounts) {
       warn("[telegram] no chat id — add the bot to your group and send any message, then set TELEGRAM_CHAT_ID");
       return 0;
     }
-    const message = buildMessage(cyclesToSend, totalToSend);
-    const parts = splitMessage(message);
+    const nowMs = Math.max(...cyclesToSend.map((c) => c.serverNowMs));
+    const alert = buildAlertMessage({
+      cycles: cyclesToSend,
+      nowMs,
+      windowMinutes: config.windowMinutes,
+      emoji: config.alertEmoji,
+    });
+    const parts = splitAlertMessage(alert);
     for (const part of parts) {
       for (const cid of chatIds) {
         try {
-          await sendTelegram({ token: config.telegram.token, chatId: cid, text: part, dryRun: config.dryRun, logger });
+          await sendTelegram({
+            token: config.telegram.token,
+            chatId: cid,
+            text: part.text,
+            entities: part.entities,
+            dryRun: config.dryRun,
+            logger,
+          });
         } catch (err) {
           health.telegramErrors += 1;
           warn(`[telegram] send to ${cid} failed: ${err.message}`);

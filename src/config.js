@@ -76,6 +76,13 @@ export function loadConfig() {
   const allChatIds = [...new Set([...telegramChatIds, ...telegramChatIdsPlural])];
   const telegramChatId = allChatIds[0] || null;
 
+  // Premium custom emoji IDs used in alert headers. Defaults match the
+  // reference alert (🆕 + 🎤🎤🎤). Override via env if a different pack is wanted.
+  const alertEmoji = {
+    new: optional("ALERT_EMOJI_NEW", "5382357040008021292"),
+    mic: optional("ALERT_EMOJI_MIC", "5778673721317267508"),
+  };
+
   const cliFile = optional("CLI_FILE", "./data/clis.json");
   const maxClis = int("MAX_CLIS", 0, { min: 0 }); // 0 = unlimited
   const clisPerCycle = int("CLIS_PER_CYCLE", 12, { min: 0 }); // 0 = all each cycle
@@ -128,6 +135,7 @@ export function loadConfig() {
       refreshMinutes: signalRefreshMinutes,
     },
     telegram: { token: telegramToken, chatId: telegramChatId, chatIds: allChatIds },
+    alertEmoji,
     manualClis,
     priorityClis,
     cliFile,
