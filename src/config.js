@@ -38,6 +38,20 @@ function parseAccounts(raw) {
   return out;
 }
 
+// Stable FNV-1a shard. Every worker derives the SAME owner for a CLI, so with
+// N workers each CLI is checked by exactly one of them — no duplicate alerts
+// even though every worker sends to the same Telegram group.
+export function shardFor(value, total) {
+  if (!total || total <= 1) return 0;
+  const s = String(value ?? "").toLowerCase();
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i += 1) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0) % total;
+}
+
 export function loadConfig() {
   const manualClis = parseClis(process.env.LAMIX_CLIS || process.env.LAMIX_CLI || "");
 
@@ -93,7 +107,12 @@ export function loadConfig() {
 
   const port = process.env.PORT ? Number.parseInt(process.env.PORT, 10) : null;
 
+  // Multi-worker sharding. WORKER_TOTAL=1 keeps the old single-bot behaviour.
+  const workerTotal = int("WORKER_TOTAL", 1, { min: 1, max: 64 });
+  const workerId = int("WORKER_ID", 0, { min: 0, max: workerTotal - 1 });
+
   return {
+    worker: { id: workerId, total: workerTotal },
     lamix: { baseUrl: lamixUrl, username: lamixUsername, password: lamixPassword },
     extraLamixAccounts,
     matrix: {

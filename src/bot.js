@@ -1,5 +1,5 @@
 import http from "node:http";
-import { loadConfig } from "./config.js";
+import { loadConfig, shardFor } from "./config.js";
 import { LamixClient, AuthError, RateLimitError, sleep, closeSharedBrowser } from "./lamix.js";
 import { MatrixClient } from "./matrix.js";
 import { SignalPulseClient } from "./signal.js";
@@ -12,6 +12,7 @@ const config = loadConfig();
 const state = new State(config.stateFile);
 const cliStore = new CliStore({ file: config.cliFile });
 const health = {
+  worker: { id: config.worker.id, total: config.worker.total },
   startedAt: new Date().toISOString(),
   lastCycleAt: null,
   lastSuccessAt: null,
@@ -279,7 +280,11 @@ async function refreshMatrixIfNeeded(matrix, force = false) {
 async function runCycle(lamixAccounts) {
   const accounts = Array.isArray(lamixAccounts) ? lamixAccounts.filter(Boolean) : [lamixAccounts];
   const client = accounts[0];
-  const allClis = cliStore.snapshot();
+  // Each worker owns a disjoint slice of the Matrix store. This is what lets
+  // several Render IPs run in parallel without ever sending the same alert.
+  const allClis = cliStore
+    .snapshot()
+    .filter((cli) => shardFor(cli, config.worker.total) === config.worker.id);
   if (accounts.length === 0) {
     warn("[lamix] no client sessions available — check LAMIX_USERNAME/PASSWORD or LAMIX_ACCOUNTS");
     return { sent: 0, cycles: [], attempts: 0, failures: 0 };
@@ -296,7 +301,7 @@ async function runCycle(lamixAccounts) {
   const prioritySet = new Set(priorityClis.map((c) => String(c).toLowerCase()));
 
   // Build ordered list: priority CLIs first, then the rest
-  const allFresh = [...cliStore.snapshot()].sort((a, b) => {
+  const allFresh = [...allClis].sort((a, b) => {
     const aP = prioritySet.has(String(a).toLowerCase()) ? 0 : 1;
     const bP = prioritySet.has(String(b).toLowerCase()) ? 0 : 1;
     if (aP !== bP) return aP - bP;
@@ -597,7 +602,7 @@ function startSelfPing() {
 }
 
 async function main() {
-  log(`starting Lamix CLI bot | CLIs source: ${[
+  log(`starting Lamix CLI bot | worker ${config.worker.id}/${config.worker.total} | CLIs source: ${[
     config.matrix.enabled ? "Matrix" : null,
     config.signal.enabled ? "SignalPulse" : null,
     "manual",
