@@ -81,10 +81,10 @@ function buildEnvVars(w, url) {
     env("SEARCH_PACING_MS", "5000"),
     env("WORKER_ID", w.workerId),
     env("WORKER_TOTAL", w.workerTotal ?? totalWorkers),
-    env("HEADLESS", "true"),
     env("PORT", "10000"),
     env("SELF_PING_ENABLED", pingUrl ? "true" : "false"),
     env("SELF_PING_URL", pingUrl),
+    env("SELF_PING_RANDOM", "1-9"), // random keep-alive every 1..9 minutes
   ];
 }
 

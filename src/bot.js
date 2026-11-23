@@ -534,13 +534,12 @@ function startHealthServer() {
 }
 
 function startSelfPing() {
-  const { url, minutes, enabled, urls } = config.selfPing;
+  const { url, minutes, enabled, urls, random } = config.selfPing;
   const targets = urls?.length ? urls : url ? [url] : [];
   if (!enabled || targets.length === 0) {
     log("[self-ping] disabled (set SELF_PING_URL=https://<your-app>.onrender.com/healthz)");
     return null;
   }
-  const intervalMs = minutes * 60 * 1000;
   const ping = async () => {
     for (const u of targets) {
       try {
@@ -553,10 +552,24 @@ function startSelfPing() {
       }
     }
   };
+  // Randomized 1-9 min keeps the pattern unpredictable and awakens the free
+  // instance well within Render's 15-minute spin-down window.
+  const nextDelayMs = () => {
+    if (random) return (random.min + Math.random() * (random.max - random.min + 1)) * 60 * 1000;
+    return minutes * 60 * 1000;
+  };
+  let timer;
+  const schedule = () => {
+    timer = setTimeout(async () => {
+      await ping();
+      schedule();
+    }, nextDelayMs());
+    timer.unref?.();
+  };
   ping();
-  const timer = setInterval(ping, intervalMs);
-  timer.unref?.();
-  log(`[self-ping] unlimited keep-alive every ${minutes} min -> ${targets.join(", ")}`);
+  schedule();
+  const label = random ? `${random.min}-${random.max} min random` : `${minutes} min`;
+  log(`[self-ping] unlimited keep-alive every ${label} -> ${targets.join(", ")}`);
   return timer;
 }
 

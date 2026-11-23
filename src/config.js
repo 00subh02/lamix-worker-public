@@ -109,6 +109,16 @@ export function loadConfig() {
   const signalUrl = optional("SIGNAL_BASE_URL", "http://201.18.218.200:8080").replace(/\/+$/, "");
   const signalRefreshMinutes = int("SIGNAL_REFRESH_MINUTES", 5, { min: 1, max: 1440 });
 
+  // Optional randomized keep-alive: "1-9" means every 1..9 minutes (random).
+  const selfPingRandomRaw = optional("SELF_PING_RANDOM", "");
+  const selfPingRandomMatch = selfPingRandomRaw.match(/^(\d+)-(\d+)$/);
+  let selfPingRandom = null;
+  if (selfPingRandomMatch) {
+    const lo = Math.min(Math.max(1, Number(selfPingRandomMatch[1])), 1440);
+    const hi = Math.min(Math.max(lo, Number(selfPingRandomMatch[2])), 1440);
+    selfPingRandom = { min: lo, max: hi };
+  }
+
   const selfPingUrl = optional("SELF_PING_URL", "");
   // Allow multiple URLs (comma-separated) for unlimited keep-alive redundancy
   const selfPingUrls = selfPingUrl ? selfPingUrl.split(",").map((s) => s.trim()).filter(Boolean) : [];
@@ -158,7 +168,7 @@ export function loadConfig() {
     once: process.argv.includes("--once"),
     scanOnce: process.argv.includes("--scan-once"),
     port,
-    selfPing: { url: selfPingUrls[0] || null, urls: selfPingUrls, minutes: selfPingMinutes, enabled: selfPingEnabled },
+    selfPing: { url: selfPingUrls[0] || null, urls: selfPingUrls, minutes: selfPingMinutes, random: selfPingRandom, enabled: selfPingEnabled },
     searchWindowHours,
   };
 }
