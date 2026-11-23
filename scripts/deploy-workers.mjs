@@ -27,7 +27,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const API = "https://api.render.com/v1";
-const REPO = "https://github.com/00subh02/lamix-cli-bot";
+const REPO = "https://github.com/00subh02/lamix-worker-public"; // single private repo for all 6 workers
 
 const workers = JSON.parse(await readFile(path.join(root, "render-workers.json"), "utf8"));
 if (!Array.isArray(workers) || workers.length === 0) throw new Error("render-workers.json is empty");
