@@ -81,6 +81,9 @@ export function loadConfig() {
   const alertEmoji = {
     NEW: optional("ALERT_EMOJI_NEW", "5382357040008021292"),
     MIC: optional("ALERT_EMOJI_MIC", "5778673721317267508"),
+    SPARKLE: optional("ALERT_EMOJI_SPARKLE", "5325547803936572038"),
+    GLOBE: optional("ALERT_EMOJI_GLOBE", "5447410659077661506"),
+    NUMBERS: parseClis(process.env.ALERT_EMOJI_NUMBERS ?? ""),
   };
 
   const cliFile = optional("CLI_FILE", "./data/clis.json");

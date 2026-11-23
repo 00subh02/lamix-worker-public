@@ -8,7 +8,22 @@
 
 export const PREMIUM_EMOJI = Object.freeze({
   NEW: "5382357040008021292", // 🆕
-  MIC: "5778673721317267508", // 🎤
+  MIC: "5778673721317267508", // 🎤🎤🎤
+  SPARKLE: "5325547803936572038", // ✨ (CLI line)
+  GLOBE: "5447410659077661506", // 🌐 (replaces "Range")
+  // 10 distinct premium "🔢" emoji, one per range number (1..10).
+  NUMBERS: Object.freeze([
+    "5211001739116821449", // 1
+    "5208437149719871602", // 2
+    "5208597815856478780", // 3
+    "5208888696811569698", // 4
+    "5210945621074132482", // 5
+    "5208725775817130065", // 6
+    "5208860620610352914", // 7
+    "5208430780283370683", // 8
+    "5211112274395151687", // 9
+    "5208541663454052543", // 10
+  ]),
 });
 
 function formatAge(ageMs) {
@@ -53,6 +68,7 @@ function formatIstStamp(ms) {
  */
 export function buildAlertMessage({ cycles, nowMs, windowMinutes, emoji }) {
   const ids = { ...PREMIUM_EMOJI, ...(emoji ?? {}) };
+  const numbers = Array.isArray(ids.NUMBERS) && ids.NUMBERS.length ? ids.NUMBERS : PREMIUM_EMOJI.NUMBERS;
   const total = cycles.reduce((sum, c) => sum + (c.alerts?.length ?? 0), 0);
   const rangeWord = total === 1 ? "RANGE" : "RANGES";
 
@@ -85,19 +101,27 @@ export function buildAlertMessage({ cycles, nowMs, windowMinutes, emoji }) {
     const multi = cycle.alerts.length > 1;
     add("bold", "CLI:");
     push(" ");
+    add("custom_emoji", "✨", { custom_emoji_id: ids.SPARKLE });
+    push(" ");
     add("code", String(cycle.cli));
     push("\n");
 
     cycle.alerts.forEach((a, index) => {
-      const num = multi ? `${index + 1}. ` : "";
       const isLast = index === cycle.alerts.length - 1;
-      add("bold", `${num}Range:`);
+      if (multi) {
+        const numberId = numbers[index];
+        if (numberId) add("custom_emoji", "🔢", { custom_emoji_id: numberId });
+        else add("bold", `${index + 1}.`); // fallback beyond 10 ranges
+        push(" ");
+      }
+      add("custom_emoji", "🌐", { custom_emoji_id: ids.GLOBE });
+      push(":");
       push(" ");
       add("code", String(a.range));
       push("\n");
       add("bold", "Time:");
-      // The reference alert omits the trailing space on the final range of a
-      // multi-range block; every other Time line keeps it.
+      // Keep the reference spacing quirk: no trailing space on the final
+      // range of a multi-range block, trailing space everywhere else.
       const trailing = multi && isLast ? "" : " ";
       push(` ${formatAge(a.ageMs)} · ${formatIstClock(a.lastSeenMs)}${trailing}\n`);
     });

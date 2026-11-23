@@ -1,10 +1,9 @@
 /**
- * Verifies the alert text + Telegram entities match the reference Premium
- * emoji format exactly (including UTF-16 offsets).
+ * Verifies the alert text + Telegram Premium emoji entities.
  *   node scripts/test-alert-format.mjs
  */
 import assert from "node:assert/strict";
-import { buildAlertMessage, splitAlertMessage } from "../src/alert-format.js";
+import { buildAlertMessage, splitAlertMessage, PREMIUM_EMOJI } from "../src/alert-format.js";
 
 const now = Date.parse("2026-11-22T20:01:21Z"); // 1:31:21 AM IST
 const ago = (sec, range) => ({ range, lastSeenMs: now - sec * 1000, ageMs: sec * 1000 });
@@ -18,39 +17,40 @@ const cycles = [
 const expectedText = `🆕 LAMIX CLI ALERT🎤🎤🎤
 23 Nov 2026 · 1:31 AM IST · 0-2 MIN · 5 RANGES
 
-CLI: TikTok
-1. Range: Malaysia Celcom LX 02Nov
+CLI: ✨ TikTok
+🔢 🌐: Malaysia Celcom LX 02Nov
 Time: 14s ago · 1:31 AM 
-2. Range: Malaysia Maxis LX 02Nov
+🔢 🌐: Malaysia Maxis LX 02Nov
 Time: 1m 01s ago · 1:30 AM
 
-CLI: Apple
-Range: Tunisia Tunisiana NEW LX 16Sep
+CLI: ✨ Apple
+🌐: Tunisia Tunisiana NEW LX 16Sep
 Time: 1m 21s ago · 1:30 AM 
 
-CLI: Bumble
-Range: Haiti LX 20Nov
+CLI: ✨ Bumble
+🌐: Haiti LX 20Nov
 Time: 9s ago · 1:31 AM 
 
-CLI: Yango
-Range: Tunisia (Fresh) 22Oct
+CLI: ✨ Yango
+🌐: Tunisia (Fresh) 22Oct
 Time: 1m 48s ago · 1:29 AM`;
 
+const n = PREMIUM_EMOJI.NUMBERS;
 const expectedEntities = [
-  [0, 2, "custom_emoji", "5382357040008021292"],
+  [0, 2, "custom_emoji", PREMIUM_EMOJI.NEW],
   [3, 15, "bold"],
-  [18, 2, "custom_emoji", "5778673721317267508"],
-  [20, 2, "custom_emoji", "5778673721317267508"],
-  [22, 2, "custom_emoji", "5778673721317267508"],
-  [73, 4, "bold"], [78, 6, "code"],
-  [85, 9, "bold"], [95, 24, "code"], [120, 5, "bold"],
-  [145, 9, "bold"], [155, 23, "code"], [179, 5, "bold"],
-  [207, 4, "bold"], [212, 5, "code"],
-  [218, 6, "bold"], [225, 30, "code"], [256, 5, "bold"],
-  [285, 4, "bold"], [290, 6, "code"],
-  [297, 6, "bold"], [304, 14, "code"], [319, 5, "bold"],
-  [344, 4, "bold"], [349, 5, "code"],
-  [355, 6, "bold"], [362, 21, "code"], [384, 5, "bold"],
+  [18, 2, "custom_emoji", PREMIUM_EMOJI.MIC],
+  [20, 2, "custom_emoji", PREMIUM_EMOJI.MIC],
+  [22, 2, "custom_emoji", PREMIUM_EMOJI.MIC],
+  [73, 4, "bold"], [78, 1, "custom_emoji", PREMIUM_EMOJI.SPARKLE], [80, 6, "code"],
+  [87, 2, "custom_emoji", n[0]], [90, 2, "custom_emoji", PREMIUM_EMOJI.GLOBE], [94, 24, "code"], [119, 5, "bold"],
+  [144, 2, "custom_emoji", n[1]], [147, 2, "custom_emoji", PREMIUM_EMOJI.GLOBE], [151, 23, "code"], [175, 5, "bold"],
+  [203, 4, "bold"], [208, 1, "custom_emoji", PREMIUM_EMOJI.SPARKLE], [210, 5, "code"],
+  [216, 2, "custom_emoji", PREMIUM_EMOJI.GLOBE], [220, 30, "code"], [251, 5, "bold"],
+  [280, 4, "bold"], [285, 1, "custom_emoji", PREMIUM_EMOJI.SPARKLE], [287, 6, "code"],
+  [294, 2, "custom_emoji", PREMIUM_EMOJI.GLOBE], [298, 14, "code"], [313, 5, "bold"],
+  [338, 4, "bold"], [343, 1, "custom_emoji", PREMIUM_EMOJI.SPARKLE], [345, 5, "code"],
+  [351, 2, "custom_emoji", PREMIUM_EMOJI.GLOBE], [355, 21, "code"], [377, 5, "bold"],
 ];
 
 const alert = buildAlertMessage({ cycles, nowMs: now, windowMinutes: 2 });
@@ -60,11 +60,12 @@ assert.deepEqual(
   expectedEntities,
   "entity offsets/types/emoji ids differ from reference",
 );
+assert.ok(!alert.entities.some((e) => e.type === "custom_emoji" && !e.custom_emoji_id), "missing custom_emoji_id");
 
 // Splitting must keep every entity attached to the right text.
 const many = Array.from({ length: 40 }, (_, i) => ({
   cli: `CLI_${i}`,
-  alerts: [ago(5 + i, `Range ${i}`)],
+  alerts: [ago(5 + i, `Range ${i}`), ago(6 + i, `Range ${i} b`)],
 }));
 const longAlert = buildAlertMessage({ cycles: many, nowMs: now, windowMinutes: 2 });
 const parts = splitAlertMessage(longAlert, 800);
@@ -76,4 +77,4 @@ for (const part of parts) {
   }
 }
 
-console.log(`PASS: exact reference text + ${alert.entities.length} entities; long alert split into ${parts.length} parts`);
+console.log(`PASS: reference text + ${alert.entities.length} entities; long alert split into ${parts.length} parts`);
