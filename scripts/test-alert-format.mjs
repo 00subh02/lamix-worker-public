@@ -77,4 +77,14 @@ for (const part of parts) {
   }
 }
 
-console.log(`PASS: reference text + ${alert.entities.length} entities; long alert split into ${parts.length} parts`);
+// Range 10 must render as [1][0], never as a lone "0".
+const ten = buildAlertMessage({
+  cycles: [{ cli: "Ten", alerts: Array.from({ length: 10 }, (_, i) => ago(i + 1, `R${i + 1}`)) }],
+  nowMs: now,
+  windowMinutes: 2,
+});
+const numberIds = ten.entities.filter((e) => e.type === "custom_emoji" && PREMIUM_EMOJI.NUMBERS.includes(e.custom_emoji_id)).map((e) => e.custom_emoji_id);
+assert.equal(numberIds.filter((id) => id === PREMIUM_EMOJI.NUMBERS[0]).length, 2, "expected 1 emoji twice (ranges 1 and 10)");
+assert.equal(numberIds.filter((id) => id === PREMIUM_EMOJI.NUMBERS[9]).length, 1, "expected 0 emoji once (range 10)");
+
+console.log(`PASS: reference text + ${alert.entities.length} entities; long alert split into ${parts.length} parts; range 10 = [1][0]`);

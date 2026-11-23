@@ -75,10 +75,10 @@ function buildEnvVars(w, url) {
     env("MATRIX_PASSWORD", process.env.MATRIX_PASSWORD),
     env("MATRIX_REFRESH_MINUTES", "1"),
     env("SIGNAL_ENABLED", "false"),
-    env("CLIS_PER_CYCLE", "400"),
+    env("CLIS_PER_CYCLE", "0"), // check the entire shard every cycle
     env("WINDOW_MINUTES", "2"),
     env("RANGE_COOLDOWN_MINUTES", "0"),
-    env("SEARCH_PACING_MS", "5000"),
+    env("CYCLE_SECONDS", "180"), // pacing 800ms comes from config default
     env("WORKER_ID", w.workerId),
     env("WORKER_TOTAL", w.workerTotal ?? totalWorkers),
     env("PORT", "10000"),

@@ -86,6 +86,13 @@ export function buildAlertMessage({ cycles, nowMs, windowMinutes, emoji }) {
     entities.push({ offset, length: value.length, type, ...(extra ?? {}) });
   };
 
+  // The 10th premium number emoji is "0". Build any range number from digits
+  // so 10 renders as [1][0], 11 as [1][1], etc. — never a lone "0" after 9.
+  const numberParts = (value) => String(value).split("").map((digit) => ({
+    glyph: "🔢",
+    id: digit === "0" ? numbers[9] : numbers[Number(digit) - 1],
+  })).filter((part) => Boolean(part.id));
+
   // Header with Premium emoji (custom_emoji entities must carry raw emoji glyphs).
   add("custom_emoji", "🆕", { custom_emoji_id: ids.NEW });
   push(" ");
@@ -109,9 +116,9 @@ export function buildAlertMessage({ cycles, nowMs, windowMinutes, emoji }) {
     cycle.alerts.forEach((a, index) => {
       const isLast = index === cycle.alerts.length - 1;
       if (multi) {
-        const numberId = numbers[index];
-        if (numberId) add("custom_emoji", "🔢", { custom_emoji_id: numberId });
-        else add("bold", `${index + 1}.`); // fallback beyond 10 ranges
+        for (const part of numberParts(index + 1)) {
+          add("custom_emoji", part.glyph, { custom_emoji_id: part.id });
+        }
         push(" ");
       }
       add("custom_emoji", "🌐", { custom_emoji_id: ids.GLOBE });
