@@ -99,10 +99,10 @@ export function loadConfig() {
   const searchWindowHours = int("SEARCH_WINDOW_HOURS", 24, { min: 1, max: 168 });
 
   // Lamix pacing / rate-limit guard
-  const searchPacingMs = int("SEARCH_PACING_MS", 800, { min: 400, max: 60000 });
-  const searchTimeoutMs = int("LAMIX_SEARCH_TIMEOUT_MS", 10000, { min: 3000, max: 60000 });
-  const priorityTimeoutMs = int("LAMIX_PRIORITY_TIMEOUT_MS", 20000, { min: 3000, max: 120000 });
-  const cycleSeconds = int("CYCLE_SECONDS", 180, { min: 15, max: 600 });
+  const searchPacingMs = int("SEARCH_PACING_MS", 600, { min: 300, max: 60000 });
+  const searchTimeoutMs = int("LAMIX_SEARCH_TIMEOUT_MS", 5000, { min: 3000, max: 60000 });
+  const priorityTimeoutMs = int("LAMIX_PRIORITY_TIMEOUT_MS", 8000, { min: 3000, max: 120000 });
+  const cycleSeconds = int("CYCLE_SECONDS", 60, { min: 15, max: 600 });
 
   // SignalPulse source (fast, no browser) — refreshed independently if enabled
   const signalEnabled = bool("SIGNAL_ENABLED", true);

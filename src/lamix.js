@@ -90,7 +90,7 @@ export class LamixClient {
     this.headless = headless;
     this.logger = logger;
     this.prioritySet = new Set((priorityClis || []).map((c) => String(c).trim().toLowerCase()));
-    this.minGapMs = Math.max(1200, Math.round(searchPacingMs / 3));
+    this.minGapMs = Math.max(500, Math.round(searchPacingMs / 3));
     this.maxGapMs = 90000;
     this.gapMs = Math.max(this.minGapMs, searchPacingMs);
     this.nextSearchAt = 0;
