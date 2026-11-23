@@ -5,9 +5,9 @@
     "serviceName": "lamix-worker-1",
     "serviceId": "srv-REPLACE_AFTER_FIRST_CREATE",
     "workerId": 0,
-    "workerTotal": 3,
-    "lamixUsername": "AK_Ayesha",
-    "lamixPassword": "AK_Ayesha"
+    "workerTotal": 6,
+    "lamixUsername": "Devil_RyomenSuk",
+    "lamixPassword": "Devil_RyomenSuk"
   },
   {
     "token": "rnd_YOUR_RENDER_API_TOKEN_2",
@@ -15,9 +15,9 @@
     "serviceName": "lamix-worker-2",
     "serviceId": "srv-REPLACE_AFTER_FIRST_CREATE",
     "workerId": 1,
-    "workerTotal": 3,
-    "lamixUsername": "AK_Asim",
-    "lamixPassword": "AK_Asim"
+    "workerTotal": 6,
+    "lamixUsername": "AK_Batman",
+    "lamixPassword": "AK_Batman"
   },
   {
     "token": "rnd_YOUR_RENDER_API_TOKEN_3",
@@ -25,7 +25,37 @@
     "serviceName": "lamix-worker-3",
     "serviceId": "srv-REPLACE_AFTER_FIRST_CREATE",
     "workerId": 2,
-    "workerTotal": 3,
+    "workerTotal": 6,
+    "lamixUsername": "AK_Ali1",
+    "lamixPassword": "AK_Ali1"
+  },
+  {
+    "token": "rnd_YOUR_RENDER_API_TOKEN_4",
+    "region": "virginia",
+    "serviceName": "lamix-worker-4",
+    "serviceId": "srv-REPLACE_AFTER_FIRST_CREATE",
+    "workerId": 3,
+    "workerTotal": 6,
+    "lamixUsername": "AK_Ayesha",
+    "lamixPassword": "AK_Ayesha"
+  },
+  {
+    "token": "rnd_YOUR_RENDER_API_TOKEN_5",
+    "region": "frankfurt",
+    "serviceName": "lamix-worker-5",
+    "serviceId": "srv-REPLACE_AFTER_FIRST_CREATE",
+    "workerId": 4,
+    "workerTotal": 6,
+    "lamixUsername": "AK_Asim",
+    "lamixPassword": "AK_Asim"
+  },
+  {
+    "token": "rnd_YOUR_RENDER_API_TOKEN_6",
+    "region": "singapore",
+    "serviceName": "lamix-worker-6",
+    "serviceId": "srv-REPLACE_AFTER_FIRST_CREATE",
+    "workerId": 5,
+    "workerTotal": 6,
     "lamixUsername": "AK_Akash",
     "lamixPassword": "AK_Akash"
   }
